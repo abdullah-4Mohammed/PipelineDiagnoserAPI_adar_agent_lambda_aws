@@ -203,7 +203,11 @@
       if (res[0] === 403) { out.hidden = false; out.innerHTML = '<p class="err">API key missing or wrong.</p>'; btn.disabled = false; btn.textContent = "Start auto-fix"; return; }
       if (!res[1].id) { out.hidden = false; out.innerHTML = '<p class="err">' + esc(res[1].error || res[1].message || "Could not start") + '</p>'; btn.disabled = false; btn.textContent = "Start auto-fix"; return; }
       currentFix = res[1].id;
+      out.hidden = false; out.innerHTML = '<p><b>Starting...</b></p>';
       poll();
+    }).catch(function () {
+      out.hidden = false; out.innerHTML = '<p class="err">Could not reach the API. Check the API key and try again.</p>';
+      btn.disabled = false; btn.textContent = "Start auto-fix";
     });
   }
 
