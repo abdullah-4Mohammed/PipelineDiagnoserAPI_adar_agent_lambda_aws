@@ -1,4 +1,4 @@
-"""Auto-fix API: start a fix, read its status, approve or reject it (page or email link)."""
+"""Auto-fix API: start a fix, read its status, approve or reject it from the web page."""
 import json
 import os
 import time
@@ -11,19 +11,16 @@ from shared import latest_failed_run
 table = boto3.resource("dynamodb").Table(os.environ["FIX_TABLE"])
 sfn = boto3.client("stepfunctions")
 STATE_MACHINE = os.environ["STATE_MACHINE_ARN"]
-# fields the page is allowed to see (task token and secret stay private)
+# fields the page is allowed to see (the task token stays private)
 PUBLIC = ["id", "status", "runId", "attempt", "pipeline", "failedSteps", "file", "rootCause",
           "summary", "confidence", "diff", "commit", "newRunId", "result", "reason", "history"]
 
 
-def response(status, body, html=False):
+def response(status, body):
     return {
         "statusCode": status,
-        "headers": {
-            "Content-Type": "text/html" if html else "application/json",
-            "Access-Control-Allow-Origin": "*",
-        },
-        "body": body if html else json.dumps(body, default=str),
+        "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+        "body": json.dumps(body, default=str),
     }
 
 
@@ -70,15 +67,6 @@ def handler(event, context):
             ok = decide(fix_id, decision)
             return response(200 if ok else 409, {"ok": ok} if ok else {"error": "Fix is not waiting for approval"})
 
-        if method == "GET" and path == "/autofix/{id}/email-decision":
-            # email links: protected by a one-time secret instead of the api key
-            item = table.get_item(Key={"id": fix_id}).get("Item") or {}
-            decision = query.get("decision")
-            if not item.get("secret") or query.get("secret") != item["secret"] or decision not in ("approve", "reject"):
-                return response(403, "<h3>Link is not valid.</h3>", html=True)
-            ok = decide(fix_id, decision)
-            msg = f"Fix {decision}d. You can close this page." if ok else "This fix is no longer waiting for approval."
-            return response(200, f"<h3>{msg}</h3>", html=True)
     except LookupError as e:
         return response(404, {"error": str(e)})
 

@@ -51,11 +51,6 @@ variable "githubTokenParam" {
   type = string
 }
 
-# ssm parameter (String) with the email that receives approval requests
-variable "notifyEmailParam" {
-  type = string
-}
-
 # commit identity used by the agent when it pushes an approved fix
 variable "commitName" {
   type = string

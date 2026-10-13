@@ -1,11 +1,10 @@
 """Auto-fix agent steps, run in order by the step functions workflow:
-propose -> request_approval (waits for you) -> push -> start_run -> check_run (loop) -> notify.
+propose -> request_approval (waits for you on the web page) -> push -> start_run -> check_run (loop) -> finish.
 Each handler is small and does one job, so each step can be retried and controlled on its own."""
 import difflib
 import json
 import os
 import re
-import secrets
 import time
 
 import boto3
@@ -14,9 +13,6 @@ from shared import (call_llm, commit_file, fetch_failed_log, mask, read_file,
                     repo_files, run_status, start_run)
 
 table = boto3.resource("dynamodb").Table(os.environ["FIX_TABLE"])
-sns = boto3.client("sns")
-TOPIC = os.environ["NOTIFY_TOPIC"]
-API_URL = os.environ["API_BASE_URL"]       # used for the approve / reject links in the email
 MAX_FILE_CHARS = 15000
 PLACEHOLDER = re.compile(r"\b(?:ACCOUNT|AWS_KEY|SECRET|BEARER|EMAIL|IP)_\d+\b")
 
@@ -33,10 +29,6 @@ def save(fix_id, **fields):
     values[":h"] = [{"t": fields["updated"], "status": fields.get("status", "")}]
     table.update_item(Key={"id": fix_id}, UpdateExpression=expr,
                       ExpressionAttributeNames=names, ExpressionAttributeValues=values)
-
-
-def notify(subject, text):
-    sns.publish(TopicArn=TOPIC, Subject=subject[:99], Message=text)
 
 
 # ---------- 1. read the failed run + the repo, propose a one-file fix ----------
@@ -108,26 +100,12 @@ def propose(event, context):
 
 def no_fix(fix_id, run, reason):
     save(fix_id, status="no_fix", reason=reason, pipeline=run["pipeline"])
-    notify(f"Auto-fix stopped: {run['pipeline']}", f"Run {run['id']}: {reason}")
     return {"hasFix": False, "reason": reason}
 
 
-# ---------- 2. ask for approval (the workflow waits here) ----------
+# ---------- 2. ask for approval (the workflow waits here until you approve or reject on the web page) ----------
 def request_approval(event, context):
-    fix_id = event["fixId"]
-    secret = secrets.token_urlsafe(24)
-    save(fix_id, status="waiting_approval", taskToken=event["taskToken"], secret=secret)
-    item = table.get_item(Key={"id": fix_id})["Item"]
-    link = f"{API_URL}/autofix/{fix_id}/email-decision?secret={secret}&decision="
-    notify(f"Approve fix? {item['pipeline']} run {item['runId']}", f"""Root cause: {item['rootCause']}
-Change: {item['summary']} ({item['confidence']} confidence)
-File: {item['file']}
-
-APPROVE: {link}approve
-REJECT:  {link}reject
-
-Diff:
-{item['diff'][:6000]}""")
+    save(event["fixId"], status="waiting_approval", taskToken=event["taskToken"])
     return {}
 
 
@@ -168,5 +146,4 @@ def finish(event, context):
         "error": f"The agent hit an error: {str(event.get('detail', ''))[:500]}",
     }.get(outcome, outcome)
     save(event["fixId"], status=outcome, reason=text)
-    notify(f"Auto-fix {outcome}: {item.get('pipeline', '')}", text)
     return {"outcome": outcome}

@@ -12,21 +12,6 @@ resource "aws_dynamodb_table" "fixes" {
   }
 }
 
-# approval requests and results go to email
-data "aws_ssm_parameter" "notify_email" {
-  name = var.notifyEmailParam
-}
-
-resource "aws_sns_topic" "notify" {
-  name = "${local.resourceName}-notify"
-}
-
-resource "aws_sns_topic_subscription" "email" {
-  topic_arn = aws_sns_topic.notify.arn
-  protocol  = "email"
-  endpoint  = data.aws_ssm_parameter.notify_email.value
-}
-
 # ---------- agent step lambdas (one function per step, same code zip) ----------
 locals {
   agentSteps = {
@@ -40,8 +25,6 @@ locals {
 
   agentEnv = merge(local.lambdaEnv, {
     FIX_TABLE     = aws_dynamodb_table.fixes.name
-    NOTIFY_TOPIC  = aws_sns_topic.notify.arn
-    API_BASE_URL  = "https://${aws_api_gateway_rest_api.api.id}.execute-api.${var.region}.amazonaws.com/dev" # stage name written as text to avoid a dependency cycle
     COMMIT_NAME   = var.commitName
     COMMIT_EMAIL  = var.commitEmail
     COAUTHOR      = var.coAuthor
@@ -110,7 +93,6 @@ resource "aws_lambda_permission" "autofix_api" {
 # /autofix                      POST  start a fix            (api key)
 # /autofix/{id}                 GET   status, diff           (api key)
 # /autofix/{id}/decision        POST  approve / reject       (api key)
-# /autofix/{id}/email-decision  GET   email approve / reject (one-time secret in the link)
 resource "aws_api_gateway_resource" "autofix" {
   rest_api_id = aws_api_gateway_rest_api.api.id
   parent_id   = aws_api_gateway_rest_api.api.root_resource_id
@@ -129,18 +111,11 @@ resource "aws_api_gateway_resource" "autofix_decision" {
   path_part   = "decision"
 }
 
-resource "aws_api_gateway_resource" "autofix_email" {
-  rest_api_id = aws_api_gateway_rest_api.api.id
-  parent_id   = aws_api_gateway_resource.autofix_id.id
-  path_part   = "email-decision"
-}
-
 locals {
   autofixRoutes = {
-    start    = { resource = aws_api_gateway_resource.autofix.id, method = "POST", key = true }
-    status   = { resource = aws_api_gateway_resource.autofix_id.id, method = "GET", key = true }
-    decision = { resource = aws_api_gateway_resource.autofix_decision.id, method = "POST", key = true }
-    email    = { resource = aws_api_gateway_resource.autofix_email.id, method = "GET", key = false }
+    start    = { resource = aws_api_gateway_resource.autofix.id, method = "POST" }
+    status   = { resource = aws_api_gateway_resource.autofix_id.id, method = "GET" }
+    decision = { resource = aws_api_gateway_resource.autofix_decision.id, method = "POST" }
   }
   # resources called from the browser page need a CORS preflight
   autofixCors = {
@@ -156,7 +131,7 @@ resource "aws_api_gateway_method" "autofix" {
   resource_id      = each.value.resource
   http_method      = each.value.method
   authorization    = "NONE"
-  api_key_required = each.value.key
+  api_key_required = true
 }
 
 resource "aws_api_gateway_integration" "autofix" {
@@ -235,7 +210,6 @@ resource "aws_iam_role_policy" "agent" {
       { Effect = "Allow", Action = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"], Resource = "arn:aws:logs:*:*:*" },
       { Effect = "Allow", Action = ["ssm:GetParameter"], Resource = local.agentParamArns },
       { Effect = "Allow", Action = ["dynamodb:GetItem", "dynamodb:UpdateItem"], Resource = aws_dynamodb_table.fixes.arn },
-      { Effect = "Allow", Action = ["sns:Publish"], Resource = aws_sns_topic.notify.arn },
     ]
   })
 }
