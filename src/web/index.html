@@ -35,7 +35,7 @@
 <body>
 <main>
   <h1>Pipeline Diagnoser</h1>
-  <p class="sub">Paste a failed CI/CD, Terraform or Kubernetes log. Secrets, account IDs, IPs and emails are masked before analysis.</p>
+  <p class="sub">Diagnose a failed Azure DevOps run by its ID or pipeline name, or paste any failed CI/CD, Terraform or Kubernetes log. Secrets, account IDs, IPs and emails are masked before analysis.</p>
 
   <div class="card">
     <div class="row">
@@ -44,18 +44,35 @@
         <input id="key" type="password" placeholder="x-api-key" autocomplete="off">
       </div>
       <div>
-        <label for="source">Log source</label>
-        <select id="source">
-          <option value="azure devops pipeline">Azure DevOps pipeline</option>
-          <option value="terraform">Terraform</option>
-          <option value="kubernetes">Kubernetes / kubectl</option>
-          <option value="github actions">GitHub Actions</option>
-          <option value="docker build">Docker build</option>
+        <label for="mode">Input</label>
+        <select id="mode">
+          <option value="ado">From Azure DevOps</option>
+          <option value="paste">Paste a log</option>
         </select>
       </div>
     </div>
-    <label for="log">Failed log</label>
-    <textarea id="log" placeholder="Paste the failed log here..."></textarea>
+
+    <div id="adoBox">
+      <label for="target">Run ID or pipeline name</label>
+      <input id="target" placeholder="e.g. 652, or infra-my-pipeline for its latest failed run">
+    </div>
+
+    <div id="pasteBox" hidden>
+      <div class="row">
+        <div>
+          <label for="source">Log source</label>
+          <select id="source">
+            <option value="azure devops pipeline">Azure DevOps pipeline</option>
+            <option value="terraform">Terraform</option>
+            <option value="kubernetes">Kubernetes / kubectl</option>
+            <option value="github actions">GitHub Actions</option>
+            <option value="docker build">Docker build</option>
+          </select>
+        </div>
+      </div>
+      <label for="log">Failed log</label>
+      <textarea id="log" placeholder="Paste the failed log here..."></textarea>
+    </div>
     <button id="go">Diagnose</button>
   </div>
 
@@ -68,6 +85,20 @@
   var out = document.getElementById("out");
   var btn = document.getElementById("go");
   var keyBox = document.getElementById("key");
+  var mode = document.getElementById("mode");
+
+  mode.onchange = function () {
+    document.getElementById("adoBox").hidden = mode.value !== "ado";
+    document.getElementById("pasteBox").hidden = mode.value !== "paste";
+  };
+
+  function requestBody() {
+    if (mode.value === "paste") {
+      return { log: document.getElementById("log").value, source: document.getElementById("source").value };
+    }
+    var t = document.getElementById("target").value.trim();
+    return /^\d+$/.test(t) ? { runId: Number(t) } : { pipeline: t };
+  }
 
   // keep the key for this browser tab only
   try { keyBox.value = sessionStorage.getItem("apiKey") || ""; } catch (e) {}
@@ -80,7 +111,7 @@
     fetch(API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": keyBox.value },
-      body: JSON.stringify({ log: document.getElementById("log").value, source: document.getElementById("source").value })
+      body: JSON.stringify(requestBody())
     })
       .then(function (r) { return r.json().then(function (d) { return [r.status, d]; }); })
       .then(function (res) {
@@ -90,7 +121,11 @@
         if (status === 429) { out.innerHTML = '<p class="err">Daily limit reached, try again later.</p>'; return; }
         if (d.error || d.message) { out.innerHTML = '<p class="err">' + esc(d.error || d.message) + '</p>'; return; }
         var conf = String(d.confidence || "").toLowerCase();
-        var html = '<p><span class="badge ' + esc(conf) + '">confidence: ' + esc(conf) + '</span></p>';
+        var html = '';
+        if (d.run) {
+          html += '<p class="muted">Run ' + esc(d.run.id) + ' · ' + esc(d.run.pipeline) + ' · failed: ' + esc(d.run.failedSteps.join(", ")) + '</p>';
+        }
+        html += '<p><span class="badge ' + esc(conf) + '">confidence: ' + esc(conf) + '</span></p>';
         html += '<h2>Root cause</h2><p>' + esc(d.rootCause) + '</p>';
         html += '<h2>Failed step</h2><p>' + esc(d.failedStep) + '</p>';
         html += '<h2>Fix</h2><ol>' + (d.fix || []).map(function (f) { return '<li>' + esc(f) + '</li>'; }).join("") + '</ol>';

@@ -22,6 +22,9 @@ resource "aws_lambda_function" "lam" {
     variables = {
       MODEL_ID      = var.modelId
       API_KEY_PARAM = var.apiKeyParam
+      ADO_TOKEN_PARAM   = var.adoTokenParam
+      ADO_ORG_PARAM     = var.adoOrgParam
+      ADO_PROJECT_PARAM = var.adoProjectParam
     }
   }
 }
@@ -151,7 +154,7 @@ resource "aws_iam_role" "role" {
 EOT
 }
 
-# Create the policy: write logs + read only the one api key parameter
+# Create the policy: write logs + read only the parameters it needs
 resource "aws_iam_policy" "policy" {
   name        = "${local.resourceName}-policy"
   description = "Policy for Lambda CloudWatch Logs and the model api key"
@@ -174,7 +177,12 @@ resource "aws_iam_policy" "policy" {
       "Action": [
         "ssm:GetParameter"
       ],
-      "Resource": "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter${var.apiKeyParam}"
+      "Resource": [
+        "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter${var.apiKeyParam}",
+        "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter${var.adoTokenParam}",
+        "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter${var.adoOrgParam}",
+        "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter${var.adoProjectParam}"
+      ]
     }
   ]
 }

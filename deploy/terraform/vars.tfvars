@@ -6,3 +6,6 @@ backendBucket = "__backendBucket__"
 modelId = "openai/gpt-oss-120b"
 apiKeyParam = "/adar-agent/grok-api-key"
 dailyQuota = 100
+adoTokenParam = "/adar-agent/az-devops-token"
+adoOrgParam = "/adar-agent/ado-org"
+adoProjectParam = "/adar-agent/ado-project"

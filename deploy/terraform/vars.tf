@@ -28,6 +28,19 @@ variable "apiKeyParam" {
   type = string
 }
 
+# ssm parameters for reading azure devops runs (token, organisation, project)
+variable "adoTokenParam" {
+  type = string
+}
+
+variable "adoOrgParam" {
+  type = string
+}
+
+variable "adoProjectParam" {
+  type = string
+}
+
 # max calls per day through the api key (usage plan)
 variable "dailyQuota" {
   type = number

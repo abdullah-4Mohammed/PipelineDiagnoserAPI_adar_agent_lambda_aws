@@ -1,8 +1,10 @@
+import base64
 import json
 import os
 import re
-import urllib.request
 import urllib.error
+import urllib.parse
+import urllib.request
 
 import boto3
 
@@ -10,12 +12,21 @@ import boto3
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 MODEL = os.environ["MODEL_ID"]
 KEY_PARAM = os.environ["API_KEY_PARAM"]
+# azure devops: token, organisation and project are read from ssm parameters
+ADO_PARAMS = {
+    "token": os.environ["ADO_TOKEN_PARAM"],
+    "org": os.environ["ADO_ORG_PARAM"],
+    "project": os.environ["ADO_PROJECT_PARAM"],
+}
+# lines kept from the end of each failed step log
+LOG_TAIL_LINES = 150
 
 # errors are usually at the end of a log, so keep the last part only
 MAX_CHARS = 20000
 
 ssm = boto3.client("ssm")
 _api_key = None
+_ado = None
 
 
 # ---------- masker ----------
@@ -100,6 +111,59 @@ def diagnose(log, source):
     return json.loads(data["choices"][0]["message"]["content"])
 
 
+# ---------- azure devops: find the failed run and read its logs (read only) ----------
+def ado_config():
+    # read once per container, then reuse on warm invocations
+    global _ado
+    if _ado is None:
+        _ado = {k: ssm.get_parameter(Name=v, WithDecryption=True)["Parameter"]["Value"] for k, v in ADO_PARAMS.items()}
+    return _ado
+
+
+def ado_get(path, raw=False):
+    cfg = ado_config()
+    url = f"https://dev.azure.com/{cfg['org']}/{cfg['project']}/_apis/{path}"
+    url += ("&" if "?" in url else "?") + "api-version=7.1"
+    auth = base64.b64encode(f":{cfg['token']}".encode()).decode()
+    req = urllib.request.Request(url, headers={"Authorization": f"Basic {auth}"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        body = r.read().decode("utf-8", "replace")
+    return body if raw else json.loads(body)
+
+
+def latest_failed_run(pipeline_name):
+    defs = ado_get("build/definitions?name=" + urllib.parse.quote(pipeline_name))["value"]
+    if not defs:
+        raise LookupError(f"No pipeline named {pipeline_name}")
+    runs = ado_get(f"build/builds?definitions={defs[0]['id']}&resultFilter=failed&$top=1")["value"]
+    if not runs:
+        raise LookupError(f"No failed runs for {pipeline_name}")
+    return runs[0]["id"]
+
+
+def fetch_failed_log(run_id):
+    build = ado_get(f"build/builds/{run_id}")
+    records = ado_get(f"build/builds/{run_id}/timeline")["records"]
+    failed = [r for r in records if r.get("type") == "Task" and r.get("result") == "failed" and r.get("log")]
+    if not failed:
+        raise LookupError(f"Run {run_id} has no failed steps (result: {build.get('result')})")
+
+    parts = []
+    for r in failed:
+        lines = ado_get(f"build/builds/{run_id}/logs/{r['log']['id']}", raw=True).splitlines()
+        # drop the timestamp at the start of each line, keep the end of the log
+        lines = [re.sub(r"^\d{4}-\d\d-\d\dT[\d:.]+Z\s?", "", l) for l in lines][-LOG_TAIL_LINES:]
+        parts.append(f"===== step: {r['name']} =====\n" + "\n".join(lines))
+
+    run = {
+        "id": run_id,
+        "pipeline": build["definition"]["name"],
+        "result": build.get("result"),
+        "failedSteps": [r["name"] for r in failed],
+    }
+    return "\n\n".join(parts), run
+
+
 # ---------- api ----------
 def response(status, body):
     # API Gateway proxy integration expects this shape
@@ -114,7 +178,10 @@ def response(status, body):
 
 
 def handler(event, context):
-    # body: {"log": "...", "source": "terraform | pipeline | kubernetes"}
+    # body, one of:
+    #   {"log": "...", "source": "terraform | pipeline | kubernetes"}
+    #   {"runId": 652}                     -> reads the failed step logs from azure devops
+    #   {"pipeline": "infra-my-pipeline"}  -> uses the latest failed run of that pipeline
     try:
         payload = json.loads(event.get("body") or "{}")
     except json.JSONDecodeError:
@@ -122,10 +189,24 @@ def handler(event, context):
     if not isinstance(payload, dict):
         payload = {}
 
-    log = payload.get("log")
-    source = str(payload.get("source", "pipeline"))[:30]
-    if not isinstance(log, str) or not log.strip():
-        return response(400, {"error": "Send JSON like {\"log\": \"failed log text\", \"source\": \"terraform\"}"})
+    run = None
+    if payload.get("runId") or payload.get("pipeline"):
+        try:
+            run_id = int(payload["runId"]) if payload.get("runId") else latest_failed_run(str(payload["pipeline"]))
+            log, run = fetch_failed_log(run_id)
+        except (ValueError, TypeError):
+            return response(400, {"error": "runId must be a number"})
+        except LookupError as e:
+            return response(404, {"error": str(e)})
+        except urllib.error.HTTPError as e:
+            msg = "Run not found in Azure DevOps" if e.code == 404 else f"Azure DevOps returned {e.code}"
+            return response(404 if e.code == 404 else 502, {"error": msg})
+        source = "azure devops pipeline"
+    else:
+        log = payload.get("log")
+        source = str(payload.get("source", "pipeline"))[:30]
+        if not isinstance(log, str) or not log.strip():
+            return response(400, {"error": "Send {\"log\": \"...\"} or {\"runId\": 123} or {\"pipeline\": \"name\"}"})
 
     truncated = len(log) > MAX_CHARS
     masked, counts = mask(log[-MAX_CHARS:])
@@ -142,4 +223,6 @@ def handler(event, context):
     result["model"] = MODEL
     result["masked"] = counts          # what was hidden before sending, e.g. {"ACCOUNT": 1}
     result["logTruncated"] = truncated
+    if run:
+        result["run"] = run
     return response(200, result)
