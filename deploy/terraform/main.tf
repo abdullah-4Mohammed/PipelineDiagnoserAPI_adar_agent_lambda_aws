@@ -72,6 +72,9 @@ resource "aws_api_gateway_deployment" "api_deployment" {
       aws_api_gateway_resource.diagnose.id,
       aws_api_gateway_method.api_method.id,
       aws_api_gateway_integration.api_integration.id,
+      aws_api_gateway_integration.options.id,
+      aws_api_gateway_integration_response.options.id,
+      aws_api_gateway_gateway_response.cors_4xx.id,
     ]))
   }
 

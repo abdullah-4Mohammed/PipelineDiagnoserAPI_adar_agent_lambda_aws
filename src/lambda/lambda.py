@@ -105,7 +105,10 @@ def response(status, body):
     # API Gateway proxy integration expects this shape
     return {
         "statusCode": status,
-        "headers": {"Content-Type": "application/json"},
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",  # lets the web page read the response
+        },
         "body": json.dumps(body),
     }
 
