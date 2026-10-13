@@ -4,7 +4,7 @@ A serverless API that diagnoses failed CI/CD, Terraform and Kubernetes logs. Sen
 
 ## Components
 - **API:** Amazon API Gateway (REST), `POST /diagnose`, protected by an API key with a daily usage plan
-- **Logic:** AWS Lambda (Python): log masker + a hosted Llama model
+- **Logic:** AWS Lambda (Python): log masker + a hosted LLM (gpt-oss-120b)
 
 ## Built with
 - Terraform (AWS: API Gateway, Lambda, IAM)
