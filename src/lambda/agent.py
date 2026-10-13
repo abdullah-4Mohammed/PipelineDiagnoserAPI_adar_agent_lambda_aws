@@ -45,12 +45,14 @@ Repository files:
 FIX_PROMPT = """You are a senior Cloud/DevOps engineer fixing a failed pipeline.
 Placeholders like ACCOUNT_1 or SECRET_1 in the log are masked values, never copy them into the file.
 Change only what is needed to fix the failure, keep the file's existing style, comments and structure.
+Return the change as exact find/replace edits on {path}: each "find" must be copied exactly
+from the current content (enough lines to be unique), "replace" is the new text for it.
 Reply only with JSON:
 {{
   "rootCause": "one or two sentences",
   "summary": "what you changed, one sentence",
   "confidence": "high | medium | low",
-  "newContent": "the FULL new content of {path}"
+  "edits": [{{"find": "exact current text", "replace": "new text"}}]
 }}
 
 Failed step(s): {steps}
@@ -80,14 +82,10 @@ def propose(event, context):
         return no_fix(fix_id, run, f"{path} is too large to rewrite safely")
 
     fix = call_llm(FIX_PROMPT.format(steps=", ".join(run["failedSteps"]), log=masked_log,
-                                     path=path, content=content), max_tokens=6000)
-    new = fix.get("newContent", "")
-    if not new.strip() or new.strip() == content.strip():
-        return no_fix(fix_id, run, "The model did not propose a change")
-    if PLACEHOLDER.search(new) and not PLACEHOLDER.search(content):
-        return no_fix(fix_id, run, "Proposed change contained masked values, rejected for safety")
-    if not new.endswith("\n") and content.endswith("\n"):
-        new += "\n"
+                                     path=path, content=content), max_tokens=2000)
+    new, problem = apply_edits(content, fix.get("edits"))
+    if problem:
+        return no_fix(fix_id, run, problem)
 
     diff = "".join(difflib.unified_diff(content.splitlines(True), new.splitlines(True),
                                         fromfile=f"a/{path}", tofile=f"b/{path}"))
@@ -96,6 +94,23 @@ def propose(event, context):
          rootCause=fix.get("rootCause", ""), summary=fix.get("summary", ""),
          confidence=fix.get("confidence", ""), diff=diff, newContent=new)
     return {**event, "hasFix": True, "attempt": attempt}
+
+
+def apply_edits(content, edits):
+    # apply the model's find/replace edits; every find must match exactly once, otherwise refuse
+    if not isinstance(edits, list) or not edits:
+        return None, "The model did not propose a change"
+    new = content
+    for e in edits:
+        find, replace = (e or {}).get("find", ""), (e or {}).get("replace", "")
+        if not find or new.count(find) != 1:
+            return None, "Proposed edit did not match the file exactly once, refused for safety"
+        if PLACEHOLDER.search(replace):
+            return None, "Proposed change contained masked values, refused for safety"
+        new = new.replace(find, replace, 1)
+    if new == content:
+        return None, "The model did not propose a change"
+    return new, None
 
 
 def no_fix(fix_id, run, reason):
