@@ -10,5 +10,5 @@ output "api_key_id" {
 
 # web page url
 output "web_url" {
-  value = "http://${aws_s3_bucket_website_configuration.web.website_endpoint}"
+  value = "https://${aws_cloudfront_distribution.web.domain_name}"
 }

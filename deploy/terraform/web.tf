@@ -1,29 +1,64 @@
-# ---------- web tier: static web page on s3 ----------
+# ---------- web tier: private s3 bucket served by cloudfront (https) ----------
 
-# bucket for the web page (bucket names are global, so the name is lower case + account id suffix)
+# random suffix keeps the global bucket name unique without exposing account details
+resource "random_id" "web" {
+  byte_length = 4
+}
+
 resource "aws_s3_bucket" "web" {
-  bucket        = lower("${local.resourceName}-web-${data.aws_caller_identity.current.account_id}")
+  bucket        = lower("${local.resourceName}-web-${random_id.web.hex}")
   force_destroy = true
 }
 
-# turn on static website hosting
-resource "aws_s3_bucket_website_configuration" "web" {
-  bucket = aws_s3_bucket.web.id
-
-  index_document {
-    suffix = "index.html"
-  }
-}
-
-# a website bucket must be readable by everyone
+# bucket stays fully private, only cloudfront can read it
 resource "aws_s3_bucket_public_access_block" "web" {
   bucket                  = aws_s3_bucket.web.id
   block_public_acls       = true
   ignore_public_acls      = true
-  block_public_policy     = false
-  restrict_public_buckets = false
+  block_public_policy     = true
+  restrict_public_buckets = true
 }
 
+# origin access control: cloudfront signs its requests to s3
+resource "aws_cloudfront_origin_access_control" "web" {
+  name                              = "${local.resourceName}-web-oac"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+
+resource "aws_cloudfront_distribution" "web" {
+  enabled             = true
+  default_root_object = "index.html"
+  price_class         = "PriceClass_100" # europe + north america edges only (cheapest)
+
+  origin {
+    domain_name              = aws_s3_bucket.web.bucket_regional_domain_name
+    origin_id                = "s3-web"
+    origin_access_control_id = aws_cloudfront_origin_access_control.web.id
+  }
+
+  default_cache_behavior {
+    target_origin_id       = "s3-web"
+    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6" # aws managed CachingOptimized
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  # default *.cloudfront.net certificate until a real domain exists
+  viewer_certificate {
+    cloudfront_default_certificate = true
+  }
+}
+
+# allow only this cloudfront distribution to read the bucket
 resource "aws_s3_bucket_policy" "web" {
   depends_on = [aws_s3_bucket_public_access_block.web]
   bucket     = aws_s3_bucket.web.id
@@ -34,9 +69,12 @@ resource "aws_s3_bucket_policy" "web" {
   "Statement": [
     {
       "Effect": "Allow",
-      "Principal": "*",
+      "Principal": { "Service": "cloudfront.amazonaws.com" },
       "Action": "s3:GetObject",
-      "Resource": "${aws_s3_bucket.web.arn}/*"
+      "Resource": "${aws_s3_bucket.web.arn}/*",
+      "Condition": {
+        "StringEquals": { "AWS:SourceArn": "${aws_cloudfront_distribution.web.arn}" }
+      }
     }
   ]
 }
