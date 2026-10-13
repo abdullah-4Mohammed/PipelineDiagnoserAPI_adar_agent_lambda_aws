@@ -1,0 +1,3 @@
+src/lambda/lambda.zip
+.terraform/
+*.tfplan

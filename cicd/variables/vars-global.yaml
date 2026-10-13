@@ -1,0 +1,7 @@
+variables:
+  region: eu-west-2
+  awsConnection: "AzToAWS"
+  backendBucketName: "backend-tfstate"
+  regionShortName: euw2
+  serviceName: pipediag-agent
+  backendBucket: "$(serviceName)-$(backendBucketName)-$(regionShortName)"
