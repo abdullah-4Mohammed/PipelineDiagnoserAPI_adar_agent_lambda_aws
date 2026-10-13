@@ -1,0 +1,86 @@
+{
+  "Comment": "Auto-fix agent: read + diagnose a failed run, propose a fix, wait for approval, push, watch the pipeline until green",
+  "StartAt": "Propose",
+  "States": {
+    "Propose": {
+      "Type": "Task",
+      "Resource": "${propose}",
+      "Retry": [{ "ErrorEquals": ["Lambda.ServiceException", "Lambda.TooManyRequestsException"], "MaxAttempts": 2 }],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "Error" }],
+      "Next": "HasFix"
+    },
+    "HasFix": {
+      "Type": "Choice",
+      "Choices": [{ "Variable": "$.hasFix", "BooleanEquals": true, "Next": "RequestApproval" }],
+      "Default": "NoFix"
+    },
+    "NoFix": { "Type": "Succeed" },
+
+    "RequestApproval": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${requestApproval}",
+        "Payload": { "fixId.$": "$.fixId", "taskToken.$": "$$.Task.Token" }
+      },
+      "TimeoutSeconds": 86400,
+      "ResultPath": "$.approval",
+      "Catch": [
+        { "ErrorEquals": ["States.Timeout"], "ResultPath": "$.error", "Next": "Expired" },
+        { "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "Error" }
+      ],
+      "Next": "Decision"
+    },
+    "Decision": {
+      "Type": "Choice",
+      "Choices": [{ "Variable": "$.approval.decision", "StringEquals": "approve", "Next": "Push" }],
+      "Default": "Rejected"
+    },
+
+    "Push": {
+      "Type": "Task",
+      "Resource": "${push}",
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "Error" }],
+      "Next": "StartRun"
+    },
+    "StartRun": {
+      "Type": "Task",
+      "Resource": "${start}",
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "Error" }],
+      "Next": "WaitRun"
+    },
+    "WaitRun": { "Type": "Wait", "Seconds": 60, "Next": "CheckRun" },
+    "CheckRun": {
+      "Type": "Task",
+      "Resource": "${check}",
+      "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 3 }],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "Error" }],
+      "Next": "RunDone"
+    },
+    "RunDone": {
+      "Type": "Choice",
+      "Choices": [
+        { "Variable": "$.done", "BooleanEquals": false, "Next": "WaitRun" },
+        { "Variable": "$.result", "StringEquals": "succeeded", "Next": "Green" }
+      ],
+      "Default": "MoreAttempts"
+    },
+    "MoreAttempts": {
+      "Type": "Choice",
+      "Choices": [{ "Variable": "$.attempt", "NumericLessThan": ${maxAttempts}, "Next": "NextAttempt" }],
+      "Default": "GaveUp"
+    },
+    "NextAttempt": {
+      "Type": "Pass",
+      "Parameters": { "fixId.$": "$.fixId", "runId.$": "$.newRunId", "attempt.$": "States.MathAdd($.attempt, 1)" },
+      "Next": "Propose"
+    },
+
+    "Green":    { "Type": "Pass", "Parameters": { "fixId.$": "$.fixId", "outcome": "green" },    "Next": "Finish" },
+    "Rejected": { "Type": "Pass", "Parameters": { "fixId.$": "$.fixId", "outcome": "rejected" }, "Next": "Finish" },
+    "Expired":  { "Type": "Pass", "Parameters": { "fixId.$": "$.fixId", "outcome": "expired" },  "Next": "Finish" },
+    "GaveUp":   { "Type": "Pass", "Parameters": { "fixId.$": "$.fixId", "outcome": "gave_up" },  "Next": "Finish" },
+    "Error":    { "Type": "Pass", "Parameters": { "fixId.$": "$.fixId", "outcome": "error", "detail.$": "$.error.Cause" }, "Next": "Finish" },
+    "Finish":   { "Type": "Task", "Resource": "${finish}", "End": true }
+  }
+}

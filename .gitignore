@@ -1,3 +1,4 @@
 src/lambda/lambda.zip
 .terraform/
 *.tfplan
+lambda.zip

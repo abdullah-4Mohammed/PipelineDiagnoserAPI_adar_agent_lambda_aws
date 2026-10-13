@@ -1,10 +1,12 @@
 # account id and region, used to build the ssm parameter arn
 data "aws_caller_identity" "current" {}
 
+# one zip with all the python code (api + agent steps share helpers in shared.py)
 data "archive_file" "lambda_zip" {
   type        = "zip"
-  source_file = "${path.module}/../../src/lambda/lambda.py"
-  output_path = "${path.module}/../../src/lambda/lambda.zip"
+  source_dir  = "${path.module}/../../src/lambda"
+  output_path = "${path.module}/../../lambda.zip"
+  excludes    = ["__pycache__"]
 }
 
 # lambda function (python) as the backend for the api gateway
@@ -19,13 +21,7 @@ resource "aws_lambda_function" "lam" {
   memory_size = 256
 
   environment {
-    variables = {
-      MODEL_ID      = var.modelId
-      API_KEY_PARAM = var.apiKeyParam
-      ADO_TOKEN_PARAM   = var.adoTokenParam
-      ADO_ORG_PARAM     = var.adoOrgParam
-      ADO_PROJECT_PARAM = var.adoProjectParam
-    }
+    variables = local.lambdaEnv
   }
 }
 
@@ -78,6 +74,8 @@ resource "aws_api_gateway_deployment" "api_deployment" {
       aws_api_gateway_integration.options.id,
       aws_api_gateway_integration_response.options.id,
       aws_api_gateway_gateway_response.cors_4xx.id,
+      jsonencode({ for k, v in aws_api_gateway_integration.autofix : k => v.id }),
+      jsonencode({ for k, v in aws_api_gateway_integration_response.autofix_options : k => v.id }),
     ]))
   }
 
