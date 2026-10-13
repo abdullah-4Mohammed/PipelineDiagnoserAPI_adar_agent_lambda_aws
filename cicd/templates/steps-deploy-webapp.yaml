@@ -1,0 +1,23 @@
+steps:
+# put the api url into the page
+- task: replacetokens@6
+  displayName: 'Replace tokens in web page'
+  inputs:
+    root: '$(System.DefaultWorkingDirectory)/src/web'
+    sources: '**/*.html'
+    tokenPattern: 'doubleunderscores'
+    logLevel: 'warn'
+    ifNoFilesFound: 'error'
+    telemetryOptout: true
+
+# upload the page to the private bucket, then clear the cloudfront cache
+- task: AWSShellScript@1
+  displayName: 'Deploy web page to S3 + CloudFront'
+  inputs:
+    awsCredentials: '$(awsConnection)'
+    regionName: '$(region)'
+    scriptType: 'inline'
+    inlineScript: |
+      set -ex
+      aws s3 sync $(System.DefaultWorkingDirectory)/src/web s3://$(webBucket) --delete
+      aws cloudfront create-invalidation --distribution-id $(webDistributionId) --paths "/*"

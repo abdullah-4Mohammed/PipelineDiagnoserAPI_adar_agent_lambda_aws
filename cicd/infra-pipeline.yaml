@@ -39,3 +39,17 @@ stages:
       - template: variables/vars-${{ env }}.yaml
       steps:
       - template: templates/steps-deploy-tf.yaml
+
+    - job: Deploy_WebApp
+      displayName: Deploy web page
+      dependsOn: Deploy_Terraform
+      variables:
+      - template: variables/vars-${{ env }}.yaml
+      - name: apiUrl
+        value: $[ dependencies.Deploy_Terraform.outputs['tfOutputs.apiUrl'] ]
+      - name: webBucket
+        value: $[ dependencies.Deploy_Terraform.outputs['tfOutputs.webBucket'] ]
+      - name: webDistributionId
+        value: $[ dependencies.Deploy_Terraform.outputs['tfOutputs.webDistributionId'] ]
+      steps:
+      - template: templates/steps-deploy-webapp.yaml

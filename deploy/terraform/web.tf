@@ -81,16 +81,6 @@ resource "aws_s3_bucket_policy" "web" {
 EOT
 }
 
-# the page, with the api url written in at deploy time
-resource "aws_s3_object" "index" {
-  bucket       = aws_s3_bucket.web.id
-  key          = "index.html"
-  content_type = "text/html"
-  content = templatefile("${path.module}/../../src/web/index.html", {
-    api_url = "${aws_api_gateway_stage.api_stage.invoke_url}/${aws_api_gateway_resource.diagnose.path_part}"
-  })
-}
-
 # ---------- CORS: let the browser page call the api ----------
 
 # browsers send OPTIONS first (preflight), answered by api gateway itself (mock)

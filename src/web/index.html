@@ -79,8 +79,8 @@
   <div class="card" id="out" hidden></div>
 </main>
 <script>
-  // filled in by terraform at deploy time
-  var API_URL = "${api_url}";
+  // filled in by the pipeline at deploy time (replacetokens)
+  var API_URL = "__apiUrl__";
 
   var out = document.getElementById("out");
   var btn = document.getElementById("go");
