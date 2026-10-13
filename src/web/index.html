@@ -153,7 +153,7 @@
     running_nonprod: "Deploying to nonprod, checking every minute...", green_nonprod: "Nonprod is green",
     running_prod: "Deploying to prod, checking every minute...", green_prod: "Prod is green",
     failed_again: "Deploy failed, diagnosing the new failure...",
-    green: "Done: fix is green on nonprod and prod", prod_rejected: "Live on nonprod, not deployed to prod", rejected: "Rejected, nothing was pushed", gave_up: "Stopped after the maximum attempts",
+    green: "Done: fix is green on nonprod and prod", green_branch: "Green on the branch (branches never deploy to prod)", prod_rejected: "Live on nonprod, not deployed to prod", rejected: "Rejected, nothing was pushed", gave_up: "Stopped after the maximum attempts",
     expired: "No approval in time, nothing was pushed", no_fix: "No fix proposed", error: "Agent error"
   };
 
@@ -192,7 +192,7 @@
     out.innerHTML = html;
   }
 
-  var FINAL = ["green", "rejected", "prod_rejected", "gave_up", "expired", "no_fix", "error"];
+  var FINAL = ["green", "green_branch", "rejected", "prod_rejected", "gave_up", "expired", "no_fix", "error"];
   var currentFix = null;
 
   function poll() {

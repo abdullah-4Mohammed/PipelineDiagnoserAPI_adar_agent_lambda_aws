@@ -161,6 +161,7 @@ def finish(event, context):
     text = {
         "green": f"Fix deployed to nonprod and prod, both green (prod run {item.get('prodRunId')}).",
         "rejected": "You rejected the proposed fix. Nothing was pushed.",
+        "green_branch": f"Fix is green on branch {item.get('branch')} (run {item.get('nonprodRunId')}). Branches never deploy to prod; merge to main to promote.",
         "prod_rejected": f"Fix is live and green on nonprod (run {item.get('nonprodRunId')}). You chose not to deploy it to prod.",
         "gave_up": f"Pipeline {item.get('pipeline')} still fails after {item.get('attempt')} attempts. Stopped.",
         "expired": "No approval within 24 hours, stopped.",

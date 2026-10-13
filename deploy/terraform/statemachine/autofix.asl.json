@@ -65,15 +65,20 @@
         { "Variable": "$.done", "BooleanEquals": false, "Next": "WaitRun" },
         { "And": [
             { "Variable": "$.result", "StringEquals": "succeeded" },
-            { "Variable": "$.deployTo", "StringEquals": "nonprod" }
+            { "Variable": "$.deployTo", "StringEquals": "nonprod" },
+            { "Variable": "$.branch", "StringEquals": "main" }
           ], "Next": "ApprovePromote" },
+        { "And": [
+            { "Variable": "$.result", "StringEquals": "succeeded" },
+            { "Variable": "$.deployTo", "StringEquals": "nonprod" }
+          ], "Next": "GreenNoProd" },
         { "Variable": "$.result", "StringEquals": "succeeded", "Next": "Green" }
       ],
       "Default": "MoreAttempts"
     },
 
     "ApprovePromote": {
-      "Comment": "approval 2: nonprod is green, deploy the same change to prod",
+      "Comment": "approval 2 (main only, branches never reach prod): nonprod is green, deploy the same change to prod",
       "Type": "Task",
       "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
       "Parameters": {
@@ -108,6 +113,7 @@
     },
 
     "Green":        { "Type": "Pass", "Parameters": { "fixId.$": "$.fixId", "outcome": "green" },         "Next": "Finish" },
+    "GreenNoProd":  { "Type": "Pass", "Parameters": { "fixId.$": "$.fixId", "outcome": "green_branch" },  "Next": "Finish" },
     "Rejected":     { "Type": "Pass", "Parameters": { "fixId.$": "$.fixId", "outcome": "rejected" },      "Next": "Finish" },
     "ProdRejected": { "Type": "Pass", "Parameters": { "fixId.$": "$.fixId", "outcome": "prod_rejected" }, "Next": "Finish" },
     "Expired":      { "Type": "Pass", "Parameters": { "fixId.$": "$.fixId", "outcome": "expired" },       "Next": "Finish" },
