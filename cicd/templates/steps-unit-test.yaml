@@ -1,0 +1,20 @@
+steps:
+- task: UsePythonVersion@0
+  displayName: 'Use Python 3.12'
+  inputs:
+    versionSpec: '3.12'
+
+# fast tests of the python code, no aws needed (aws calls are faked)
+- script: |
+    set -ex
+    pip install -q pytest boto3
+    cd $(System.DefaultWorkingDirectory)/src
+    python -m pytest tests -v --junitxml=$(System.DefaultWorkingDirectory)/test-results.xml
+  displayName: 'Run unit tests'
+
+- task: PublishTestResults@2
+  displayName: 'Publish test results'
+  condition: succeededOrFailed()
+  inputs:
+    testResultsFormat: 'JUnit'
+    testResultsFiles: '$(System.DefaultWorkingDirectory)/test-results.xml'

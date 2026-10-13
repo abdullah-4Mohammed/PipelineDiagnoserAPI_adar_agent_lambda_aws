@@ -32,8 +32,14 @@ stages:
   - stage: Deploy_${{ env }}
     displayName: Deploy ${{ env }}
     jobs:
+    - job: Unit_Test
+      displayName: Unit tests
+      steps:
+      - template: templates/steps-unit-test.yaml
+
     - job: Deploy_Terraform
       displayName: Deploy terraform infrastructure
+      dependsOn: Unit_Test
       #condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
       variables:
       - template: variables/vars-${{ env }}.yaml
@@ -53,3 +59,19 @@ stages:
         value: $[ dependencies.Deploy_Terraform.outputs['tfOutputs.webDistributionId'] ]
       steps:
       - template: templates/steps-deploy-webapp.yaml
+
+    - job: Smoke_Test
+      displayName: Smoke test
+      dependsOn:
+      - Deploy_Terraform
+      - Deploy_WebApp
+      variables:
+      - template: variables/vars-${{ env }}.yaml
+      - name: apiUrl
+        value: $[ dependencies.Deploy_Terraform.outputs['tfOutputs.apiUrl'] ]
+      - name: webUrl
+        value: $[ dependencies.Deploy_Terraform.outputs['tfOutputs.webUrl'] ]
+      - name: apiKeyId
+        value: $[ dependencies.Deploy_Terraform.outputs['tfOutputs.apiKeyId'] ]
+      steps:
+      - template: templates/steps-smoke-test.yaml

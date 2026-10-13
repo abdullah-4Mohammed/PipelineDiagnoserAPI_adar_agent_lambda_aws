@@ -1,0 +1,21 @@
+steps:
+# quick checks against the deployed stack: page loads, api is protected, api answers
+- task: AWSShellScript@1
+  displayName: 'Smoke test deployed stack'
+  inputs:
+    awsCredentials: '$(awsConnection)'
+    regionName: '$(region)'
+    scriptType: 'inline'
+    inlineScript: |
+      set -euo pipefail
+      check() { # name, expected http code, actual http code
+        if [ "$3" = "$2" ]; then echo "PASS $1 ($3)"; else echo "##vso[task.logissue type=error]FAIL $1: expected $2, got $3"; exit 1; fi
+      }
+      KEY=$(aws apigateway get-api-key --api-key $(apiKeyId) --include-value --query value --output text)
+      BASE=$(echo "$(apiUrl)" | sed 's#/diagnose$##')
+
+      check "web page loads" 200 $(curl -s -o /dev/null -w '%{http_code}' $(webUrl))
+      check "api rejects calls without a key" 403 $(curl -s -o /dev/null -w '%{http_code}' -X POST $(apiUrl) -d '{}')
+      check "api validates input" 400 $(curl -s -o /dev/null -w '%{http_code}' -X POST $(apiUrl) -H "x-api-key: $KEY" -d '{}')
+      check "api diagnoses a log" 200 $(curl -s -o /dev/null -w '%{http_code}' -X POST $(apiUrl) -H "x-api-key: $KEY" -d '{"log":"Error: no such host example.internal","source":"terraform"}')
+      check "auto-fix api is up" 404 $(curl -s -o /dev/null -w '%{http_code}' $BASE/autofix/does-not-exist -H "x-api-key: $KEY")

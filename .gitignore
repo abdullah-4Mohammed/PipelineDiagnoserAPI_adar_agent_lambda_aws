@@ -2,3 +2,6 @@ src/lambda/lambda.zip
 .terraform/
 *.tfplan
 lambda.zip
+__pycache__/
+.pytest_cache/
+test-results.xml
