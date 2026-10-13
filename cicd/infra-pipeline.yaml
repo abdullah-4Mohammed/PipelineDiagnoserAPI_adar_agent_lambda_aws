@@ -19,6 +19,8 @@ resources:
 variables:
 - template: variables/vars-global.yaml
 
+# runs deploy nonprod by default; prod is deployed only when asked for (environments: [prod])
+# and only from main, after nonprod has been checked
 parameters:
 - name: environments
   type: object
@@ -31,6 +33,8 @@ stages:
 - ${{ each env in parameters.environments }}:
   - stage: Deploy_${{ env }}
     displayName: Deploy ${{ env }}
+    ${{ if eq(env, 'prod') }}:
+      condition: eq(variables['Build.SourceBranch'], 'refs/heads/main')
     jobs:
     - job: Unit_Test
       displayName: Unit tests

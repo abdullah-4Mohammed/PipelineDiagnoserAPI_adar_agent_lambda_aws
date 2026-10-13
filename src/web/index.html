@@ -150,8 +150,10 @@
     started: "Starting...", diagnosing: "Reading the run and the repo, diagnosing...",
     proposed: "Fix proposed, preparing approval...", waiting_approval: "Waiting for your approval",
     approved: "Approved, pushing the change...", rejecting: "Rejecting...", pushed: "Pushed, starting the pipeline...",
-    running: "Pipeline running, checking every minute...", failed_again: "Pipeline failed again, diagnosing the new failure...",
-    green: "Pipeline is green", rejected: "Rejected, nothing was pushed", gave_up: "Stopped after the maximum attempts",
+    running_nonprod: "Deploying to nonprod, checking every minute...", green_nonprod: "Nonprod is green",
+    running_prod: "Deploying to prod, checking every minute...", green_prod: "Prod is green",
+    failed_again: "Deploy failed, diagnosing the new failure...",
+    green: "Done: fix is green on nonprod and prod", prod_rejected: "Live on nonprod, not deployed to prod", rejected: "Rejected, nothing was pushed", gave_up: "Stopped after the maximum attempts",
     expired: "No approval in time, nothing was pushed", no_fix: "No fix proposed", error: "Agent error"
   };
 
@@ -176,15 +178,21 @@
     if (f.rootCause) { html += '<h2>Root cause</h2><p>' + esc(f.rootCause) + '</p>'; }
     if (f.summary) { html += '<h2>Proposed change <span class="badge ' + esc(f.confidence) + '">' + esc(f.confidence) + '</span></h2><p>' + esc(f.summary) + ' <span class="muted">(' + esc(f.file) + ')</span></p>' + renderDiff(f.diff); }
     if (f.status === "waiting_approval") {
-      html += '<div class="actions"><button onclick="decide(\'approve\')">Approve and push</button><button class="reject" onclick="decide(\'reject\')">Reject</button></div>';
+      var promote = f.approvalType === "promote";
+      if (promote) { html += '<p><b>Nonprod is green (run ' + esc(f.nonprodRunId) + '). Deploy this change to prod?</b></p>'; }
+      html += '<div class="actions"><button onclick="decide(\'approve\')">' + (promote ? 'Approve deploy to prod' : 'Approve and push') + '</button><button class="reject" onclick="decide(\'reject\')">Reject</button></div>';
     }
-    if (f.commit) { html += '<p class="muted">Commit ' + esc(String(f.commit).slice(0, 7)) + (f.newRunId ? ' · pipeline run ' + esc(f.newRunId) : '') + (f.result ? ' · ' + esc(f.result) : '') + '</p>'; }
+    if (f.commit) {
+      html += '<p class="muted">Commit ' + esc(String(f.commit).slice(0, 7)) +
+        (f.nonprodRunId ? ' · nonprod run ' + esc(f.nonprodRunId) : '') +
+        (f.prodRunId ? ' · prod run ' + esc(f.prodRunId) : '') + '</p>';
+    }
     if (f.reason) { html += '<p class="muted">' + esc(f.reason) + '</p>'; }
     out.hidden = false;
     out.innerHTML = html;
   }
 
-  var FINAL = ["green", "rejected", "gave_up", "expired", "no_fix", "error"];
+  var FINAL = ["green", "rejected", "prod_rejected", "gave_up", "expired", "no_fix", "error"];
   var currentFix = null;
 
   function poll() {

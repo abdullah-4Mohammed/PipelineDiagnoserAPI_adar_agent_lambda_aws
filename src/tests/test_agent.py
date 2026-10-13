@@ -61,3 +61,20 @@ def test_decision_only_when_waiting_for_approval(monkeypatch):
     assert autofix_api.decide("f1", "approve") is False and sent == []
     monkeypatch.setattr(autofix_api, "table", FakeTable("waiting_approval"))
     assert autofix_api.decide("f1", "approve") is True and len(sent) == 1
+
+
+def test_start_deploys_nonprod_by_default_and_prod_on_request(monkeypatch):
+    calls, saved = [], {}
+    monkeypatch.setattr(agent, "start_run", lambda pid, branch, env: calls.append(env) or 100)
+    monkeypatch.setattr(agent, "save", lambda fix_id, **f: saved.update(f))
+    agent.start({"fixId": "f1", "pipelineId": 9, "branch": "main", "deployTo": "nonprod"}, None)
+    assert calls[-1] is None and saved["status"] == "running_nonprod" and saved["nonprodRunId"] == 100
+    agent.start({"fixId": "f1", "pipelineId": 9, "branch": "main", "deployTo": "prod"}, None)
+    assert calls[-1] == "prod" and saved["status"] == "running_prod" and saved["prodRunId"] == 100
+
+
+def test_approval_records_its_kind(monkeypatch):
+    saved = {}
+    monkeypatch.setattr(agent, "save", lambda fix_id, **f: saved.update(f))
+    agent.request_approval({"fixId": "f1", "kind": "promote", "taskToken": "t"}, None)
+    assert saved["status"] == "waiting_approval" and saved["approvalType"] == "promote"

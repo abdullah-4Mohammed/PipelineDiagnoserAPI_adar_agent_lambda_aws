@@ -1,5 +1,6 @@
 """Auto-fix agent steps, run in order by the step functions workflow:
-propose -> request_approval (waits for you on the web page) -> push -> start_run -> check_run (loop) -> finish.
+propose -> approve fix -> push -> deploy nonprod + check -> approve prod -> deploy prod + check -> finish.
+Approvals wait for you on the web page.
 Each handler is small and does one job, so each step can be retried and controlled on its own."""
 import difflib
 import json
@@ -120,7 +121,9 @@ def no_fix(fix_id, run, reason):
 
 # ---------- 2. ask for approval (the workflow waits here until you approve or reject on the web page) ----------
 def request_approval(event, context):
-    save(event["fixId"], status="waiting_approval", taskToken=event["taskToken"])
+    # kind: "fix" = push the proposed change, "promote" = deploy the checked change to prod
+    save(event["fixId"], status="waiting_approval", approvalType=event.get("kind", "fix"),
+         taskToken=event["taskToken"])
     return {}
 
 
@@ -135,18 +138,20 @@ def push(event, context):
     return {**event, "commit": sha, "pipelineId": int(item["pipelineId"]), "branch": item["branch"]}
 
 
-# ---------- 4. run the pipeline and watch it ----------
+# ---------- 4. deploy (nonprod first, prod after approval) and watch it ----------
 def start(event, context):
-    new_run = start_run(event["pipelineId"], event["branch"])
-    save(event["fixId"], status="running", newRunId=new_run)
+    env = event.get("deployTo", "nonprod")
+    new_run = start_run(event["pipelineId"], event["branch"], None if env == "nonprod" else env)
+    save(event["fixId"], status=f"running_{env}", newRunId=new_run, **{f"{env}RunId": new_run})
     return {**event, "newRunId": new_run}
 
 
 def check(event, context):
+    env = event.get("deployTo", "nonprod")
     status, result = run_status(event["newRunId"])
     done = status == "completed"
     if done:
-        save(event["fixId"], status="green" if result == "succeeded" else "failed_again", result=result)
+        save(event["fixId"], status=f"green_{env}" if result == "succeeded" else "failed_again", result=result)
     return {**event, "done": done, "result": result}
 
 
@@ -154,10 +159,11 @@ def finish(event, context):
     item = table.get_item(Key={"id": event["fixId"]})["Item"]
     outcome = event.get("outcome", "")
     text = {
-        "green": f"Pipeline {item.get('pipeline')} is green after the fix (run {item.get('newRunId')}).",
+        "green": f"Fix deployed to nonprod and prod, both green (prod run {item.get('prodRunId')}).",
         "rejected": "You rejected the proposed fix. Nothing was pushed.",
+        "prod_rejected": f"Fix is live and green on nonprod (run {item.get('nonprodRunId')}). You chose not to deploy it to prod.",
         "gave_up": f"Pipeline {item.get('pipeline')} still fails after {item.get('attempt')} attempts. Stopped.",
-        "expired": "No approval within 24 hours. Nothing was pushed.",
+        "expired": "No approval within 24 hours, stopped.",
         "error": f"The agent hit an error: {str(event.get('detail', ''))[:500]}",
     }.get(outcome, outcome)
     save(event["fixId"], status=outcome, reason=text)

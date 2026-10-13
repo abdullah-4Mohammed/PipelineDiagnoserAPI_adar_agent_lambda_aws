@@ -152,8 +152,11 @@ def fetch_failed_log(run_id):
     return "\n\n".join(parts), run
 
 
-def start_run(pipeline_id, branch="main"):
+def start_run(pipeline_id, branch="main", deploy_to=None):
+    # deploy_to=None runs the pipeline's default (nonprod); "prod" asks for the prod stage
     payload = {"resources": {"repositories": {"self": {"refName": f"refs/heads/{branch}"}}}}
+    if deploy_to:
+        payload["templateParameters"] = {"environments": f"[{deploy_to}]"}
     return ado_request(f"pipelines/{pipeline_id}/runs", payload=payload)["id"]
 
 

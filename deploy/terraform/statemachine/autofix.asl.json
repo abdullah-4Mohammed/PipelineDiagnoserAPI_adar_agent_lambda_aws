@@ -1,5 +1,5 @@
 {
-  "Comment": "Auto-fix agent: read + diagnose a failed run, propose a fix, wait for approval, push, watch the pipeline until green",
+  "Comment": "Auto-fix agent: diagnose a failed run, propose a fix, approval 1 -> push + deploy nonprod + check, approval 2 -> deploy prod + check",
   "StartAt": "Propose",
   "States": {
     "Propose": {
@@ -11,17 +11,18 @@
     },
     "HasFix": {
       "Type": "Choice",
-      "Choices": [{ "Variable": "$.hasFix", "BooleanEquals": true, "Next": "RequestApproval" }],
+      "Choices": [{ "Variable": "$.hasFix", "BooleanEquals": true, "Next": "ApproveFix" }],
       "Default": "NoFix"
     },
     "NoFix": { "Type": "Succeed" },
 
-    "RequestApproval": {
+    "ApproveFix": {
+      "Comment": "approval 1: push the proposed change",
       "Type": "Task",
       "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
       "Parameters": {
         "FunctionName": "${requestApproval}",
-        "Payload": { "fixId.$": "$.fixId", "taskToken.$": "$$.Task.Token" }
+        "Payload": { "fixId.$": "$.fixId", "kind": "fix", "taskToken.$": "$$.Task.Token" }
       },
       "TimeoutSeconds": 86400,
       "ResultPath": "$.approval",
@@ -29,20 +30,21 @@
         { "ErrorEquals": ["States.Timeout"], "ResultPath": "$.error", "Next": "Expired" },
         { "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "Error" }
       ],
-      "Next": "Decision"
+      "Next": "FixDecision"
     },
-    "Decision": {
+    "FixDecision": {
       "Type": "Choice",
       "Choices": [{ "Variable": "$.approval.decision", "StringEquals": "approve", "Next": "Push" }],
       "Default": "Rejected"
     },
-
     "Push": {
       "Type": "Task",
       "Resource": "${push}",
       "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "Error" }],
-      "Next": "StartRun"
+      "Next": "ToNonprod"
     },
+    "ToNonprod": { "Type": "Pass", "Result": "nonprod", "ResultPath": "$.deployTo", "Next": "StartRun" },
+
     "StartRun": {
       "Type": "Task",
       "Resource": "${start}",
@@ -61,26 +63,56 @@
       "Type": "Choice",
       "Choices": [
         { "Variable": "$.done", "BooleanEquals": false, "Next": "WaitRun" },
+        { "And": [
+            { "Variable": "$.result", "StringEquals": "succeeded" },
+            { "Variable": "$.deployTo", "StringEquals": "nonprod" }
+          ], "Next": "ApprovePromote" },
         { "Variable": "$.result", "StringEquals": "succeeded", "Next": "Green" }
       ],
       "Default": "MoreAttempts"
     },
+
+    "ApprovePromote": {
+      "Comment": "approval 2: nonprod is green, deploy the same change to prod",
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${requestApproval}",
+        "Payload": { "fixId.$": "$.fixId", "kind": "promote", "taskToken.$": "$$.Task.Token" }
+      },
+      "TimeoutSeconds": 86400,
+      "ResultPath": "$.approval",
+      "Catch": [
+        { "ErrorEquals": ["States.Timeout"], "ResultPath": "$.error", "Next": "Expired" },
+        { "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "Error" }
+      ],
+      "Next": "PromoteDecision"
+    },
+    "PromoteDecision": {
+      "Type": "Choice",
+      "Choices": [{ "Variable": "$.approval.decision", "StringEquals": "approve", "Next": "ToProd" }],
+      "Default": "ProdRejected"
+    },
+    "ToProd": { "Type": "Pass", "Result": "prod", "ResultPath": "$.deployTo", "Next": "StartRun" },
+
     "MoreAttempts": {
       "Type": "Choice",
       "Choices": [{ "Variable": "$.attempt", "NumericLessThan": ${maxAttempts}, "Next": "NextAttempt" }],
       "Default": "GaveUp"
     },
     "NextAttempt": {
+      "Comment": "a new fix always goes through nonprod again before prod",
       "Type": "Pass",
       "Parameters": { "fixId.$": "$.fixId", "runId.$": "$.newRunId", "attempt.$": "States.MathAdd($.attempt, 1)" },
       "Next": "Propose"
     },
 
-    "Green":    { "Type": "Pass", "Parameters": { "fixId.$": "$.fixId", "outcome": "green" },    "Next": "Finish" },
-    "Rejected": { "Type": "Pass", "Parameters": { "fixId.$": "$.fixId", "outcome": "rejected" }, "Next": "Finish" },
-    "Expired":  { "Type": "Pass", "Parameters": { "fixId.$": "$.fixId", "outcome": "expired" },  "Next": "Finish" },
-    "GaveUp":   { "Type": "Pass", "Parameters": { "fixId.$": "$.fixId", "outcome": "gave_up" },  "Next": "Finish" },
-    "Error":    { "Type": "Pass", "Parameters": { "fixId.$": "$.fixId", "outcome": "error", "detail.$": "$.error.Cause" }, "Next": "Finish" },
-    "Finish":   { "Type": "Task", "Resource": "${finish}", "End": true }
+    "Green":        { "Type": "Pass", "Parameters": { "fixId.$": "$.fixId", "outcome": "green" },         "Next": "Finish" },
+    "Rejected":     { "Type": "Pass", "Parameters": { "fixId.$": "$.fixId", "outcome": "rejected" },      "Next": "Finish" },
+    "ProdRejected": { "Type": "Pass", "Parameters": { "fixId.$": "$.fixId", "outcome": "prod_rejected" }, "Next": "Finish" },
+    "Expired":      { "Type": "Pass", "Parameters": { "fixId.$": "$.fixId", "outcome": "expired" },       "Next": "Finish" },
+    "GaveUp":       { "Type": "Pass", "Parameters": { "fixId.$": "$.fixId", "outcome": "gave_up" },       "Next": "Finish" },
+    "Error":        { "Type": "Pass", "Parameters": { "fixId.$": "$.fixId", "outcome": "error", "detail.$": "$.error.Cause" }, "Next": "Finish" },
+    "Finish":       { "Type": "Task", "Resource": "${finish}", "End": true }
   }
 }
