@@ -1,5 +1,4 @@
 name: $(SourceBranchName)-$(Date:yyyyMMdd)$(Rev:.r)-${{ join('-', parameters.environments) }}
-#go
 trigger:
   branches:
     include:
