@@ -194,15 +194,52 @@
 
   var FINAL = ["green", "green_branch", "rejected", "prod_rejected", "gave_up", "expired", "no_fix", "error"];
   var currentFix = null;
+  var lastStatus = null;
+
+  // every status check is one api call against the daily quota, so poll
+  // slowly: the agent only changes state every few seconds to a minute
+  var SLOW = ["running_nonprod", "running_prod", "waiting_approval"];
+  var FAST_MS = 10000, SLOW_MS = 30000, MAX_ERRORS = 5;
+  var errorCount = 0;
+
+  function nextDelay(status) {
+    return SLOW.indexOf(status) === -1 ? FAST_MS : SLOW_MS;
+  }
+
+  function schedule(ms) {
+    clearTimeout(pollTimer);
+    pollTimer = setTimeout(poll, ms);
+  }
 
   function poll() {
+    // no calls while the tab is hidden; resumes when it becomes visible again
+    if (document.hidden) { return; }
     api("GET", "/autofix/" + currentFix).then(function (res) {
-      if (res[0] !== 200) { out.innerHTML = '<p class="err">' + esc(res[1].error || res[1].message || "Error") + '</p>'; return; }
+      if (res[0] !== 200) {
+        var msg = res[0] === 429 ? "Daily API quota reached. Try again tomorrow." : (res[1].error || res[1].message || "Error");
+        out.innerHTML = '<p class="err">' + esc(msg) + '</p>';
+        btn.disabled = false; btn.textContent = "Start auto-fix";
+        return;
+      }
+      errorCount = 0;
+      lastStatus = res[1].status;
       renderFix(res[1]);
-      if (FINAL.indexOf(res[1].status) === -1) { pollTimer = setTimeout(poll, 5000); }
+      if (FINAL.indexOf(res[1].status) === -1) { schedule(nextDelay(res[1].status)); }
       else { btn.disabled = false; btn.textContent = "Start auto-fix"; }
-    }).catch(function () { pollTimer = setTimeout(poll, 8000); });
+    }).catch(function () {
+      errorCount += 1;
+      if (errorCount >= MAX_ERRORS) {
+        out.innerHTML = '<p class="err">Lost contact with the API. Reload the page to continue.</p>';
+        btn.disabled = false; btn.textContent = "Start auto-fix";
+        return;
+      }
+      schedule(SLOW_MS * errorCount);
+    });
   }
+
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden && currentFix && FINAL.indexOf(lastStatus) === -1) { schedule(0); }
+  });
 
   function startFix() {
     clearTimeout(pollTimer);
@@ -210,7 +247,7 @@
     api("POST", "/autofix", requestBody()).then(function (res) {
       if (res[0] === 403) { out.hidden = false; out.innerHTML = '<p class="err">API key missing or wrong.</p>'; btn.disabled = false; btn.textContent = "Start auto-fix"; return; }
       if (!res[1].id) { out.hidden = false; out.innerHTML = '<p class="err">' + esc(res[1].error || res[1].message || "Could not start") + '</p>'; btn.disabled = false; btn.textContent = "Start auto-fix"; return; }
-      currentFix = res[1].id;
+      currentFix = res[1].id; lastStatus = null; errorCount = 0;
       out.hidden = false; out.innerHTML = '<p><b>Starting...</b></p>';
       poll();
     }).catch(function () {
