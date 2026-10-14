@@ -29,6 +29,8 @@
     ol, ul { margin:0; padding-left:20px; }
     pre { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:12px; overflow-x:auto; font-size:.85rem; white-space:pre-wrap; }
     .badge { display:inline-block; padding:2px 10px; border-radius:99px; font-size:.8rem; font-weight:700; border:1px solid currentColor; }
+    .diff .add { color:#2e7d32; } .diff .del { color:var(--err); } .diff .hunk { color:var(--muted); }
+    .actions button { margin-right:8px; } .reject { background:transparent; color:var(--err); border:1px solid var(--err); }
     .high { color:#2e7d32; } .medium { color:#b26a00; } .low { color:var(--err); }
   </style>
 </head>
@@ -47,6 +49,7 @@
         <label for="mode">Input</label>
         <select id="mode">
           <option value="ado">From Azure DevOps</option>
+          <option value="fix">Auto-fix (Azure DevOps)</option>
           <option value="paste">Paste a log</option>
         </select>
       </div>
@@ -88,7 +91,8 @@
   var mode = document.getElementById("mode");
 
   mode.onchange = function () {
-    document.getElementById("adoBox").hidden = mode.value !== "ado";
+    document.getElementById("adoBox").hidden = mode.value === "paste";
+    btn.textContent = mode.value === "fix" ? "Start auto-fix" : "Diagnose";
     document.getElementById("pasteBox").hidden = mode.value !== "paste";
   };
 
@@ -107,6 +111,7 @@
 
   btn.onclick = function () {
     try { sessionStorage.setItem("apiKey", keyBox.value); } catch (e) {}
+    if (mode.value === "fix") { startFix(); return; }
     btn.disabled = true; btn.textContent = "Diagnosing...";
     fetch(API_URL, {
       method: "POST",
@@ -136,6 +141,88 @@
       })
       .catch(function () { out.hidden = false; out.innerHTML = '<p class="err">Could not reach the API.</p>'; })
       .finally(function () { btn.disabled = false; btn.textContent = "Diagnose"; });
+  };
+
+  // ---------- auto-fix: start, poll status, approve / reject ----------
+  var BASE_URL = API_URL.replace(/\/diagnose$/, "");
+  var pollTimer = null;
+  var STATUS_TEXT = {
+    started: "Starting...", diagnosing: "Reading the run and the repo, diagnosing...",
+    proposed: "Fix proposed, preparing approval...", waiting_approval: "Waiting for your approval",
+    approved: "Approved, pushing the change...", rejecting: "Rejecting...", pushed: "Pushed, starting the pipeline...",
+    running_nonprod: "Deploying to nonprod, checking every minute...", green_nonprod: "Nonprod is green",
+    running_prod: "Deploying to prod, checking every minute...", green_prod: "Prod is green",
+    failed_again: "Deploy failed, diagnosing the new failure...",
+    green: "Done: fix is green on nonprod and prod", green_branch: "Green on the branch (branches never deploy to prod)", prod_rejected: "Live on nonprod, not deployed to prod", rejected: "Rejected, nothing was pushed", gave_up: "Stopped after the maximum attempts",
+    expired: "No approval in time, nothing was pushed", no_fix: "No fix proposed", error: "Agent error"
+  };
+
+  function api(method, path, body) {
+    return fetch(BASE_URL + path, {
+      method: method,
+      headers: { "Content-Type": "application/json", "x-api-key": keyBox.value },
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function (r) { return r.json().then(function (d) { return [r.status, d]; }); });
+  }
+
+  function renderDiff(diff) {
+    return '<pre class="diff">' + String(diff || "").split("\n").map(function (l) {
+      var c = l.indexOf("@@") === 0 ? "hunk" : (l[0] === "+" && l.indexOf("+++") !== 0) ? "add" : (l[0] === "-" && l.indexOf("---") !== 0) ? "del" : "";
+      return '<span class="' + c + '">' + esc(l) + '</span>';
+    }).join("\n") + '</pre>';
+  }
+
+  function renderFix(f) {
+    var html = '<p><b>' + esc(STATUS_TEXT[f.status] || f.status) + '</b>' + (f.attempt ? ' <span class="muted">· attempt ' + esc(f.attempt) + '</span>' : '') + '</p>';
+    html += '<p class="muted">Run ' + esc(f.runId) + (f.pipeline ? ' · ' + esc(f.pipeline) : '') + (f.failedSteps ? ' · failed: ' + esc(f.failedSteps.join(", ")) : '') + '</p>';
+    if (f.rootCause) { html += '<h2>Root cause</h2><p>' + esc(f.rootCause) + '</p>'; }
+    if (f.summary) { html += '<h2>Proposed change <span class="badge ' + esc(f.confidence) + '">' + esc(f.confidence) + '</span></h2><p>' + esc(f.summary) + ' <span class="muted">(' + esc(f.file) + ')</span></p>' + renderDiff(f.diff); }
+    if (f.status === "waiting_approval") {
+      var promote = f.approvalType === "promote";
+      if (promote) { html += '<p><b>Nonprod is green (run ' + esc(f.nonprodRunId) + '). Deploy this change to prod?</b></p>'; }
+      html += '<div class="actions"><button onclick="decide(\'approve\')">' + (promote ? 'Approve deploy to prod' : 'Approve and push') + '</button><button class="reject" onclick="decide(\'reject\')">Reject</button></div>';
+    }
+    if (f.commit) {
+      html += '<p class="muted">Commit ' + esc(String(f.commit).slice(0, 7)) +
+        (f.nonprodRunId ? ' · nonprod run ' + esc(f.nonprodRunId) : '') +
+        (f.prodRunId ? ' · prod run ' + esc(f.prodRunId) : '') + '</p>';
+    }
+    if (f.reason) { html += '<p class="muted">' + esc(f.reason) + '</p>'; }
+    out.hidden = false;
+    out.innerHTML = html;
+  }
+
+  var FINAL = ["green", "green_branch", "rejected", "prod_rejected", "gave_up", "expired", "no_fix", "error"];
+  var currentFix = null;
+
+  function poll() {
+    api("GET", "/autofix/" + currentFix).then(function (res) {
+      if (res[0] !== 200) { out.innerHTML = '<p class="err">' + esc(res[1].error || res[1].message || "Error") + '</p>'; return; }
+      renderFix(res[1]);
+      if (FINAL.indexOf(res[1].status) === -1) { pollTimer = setTimeout(poll, 5000); }
+      else { btn.disabled = false; btn.textContent = "Start auto-fix"; }
+    }).catch(function () { pollTimer = setTimeout(poll, 8000); });
+  }
+
+  function startFix() {
+    clearTimeout(pollTimer);
+    btn.disabled = true; btn.textContent = "Working...";
+    api("POST", "/autofix", requestBody()).then(function (res) {
+      if (res[0] === 403) { out.hidden = false; out.innerHTML = '<p class="err">API key missing or wrong.</p>'; btn.disabled = false; btn.textContent = "Start auto-fix"; return; }
+      if (!res[1].id) { out.hidden = false; out.innerHTML = '<p class="err">' + esc(res[1].error || res[1].message || "Could not start") + '</p>'; btn.disabled = false; btn.textContent = "Start auto-fix"; return; }
+      currentFix = res[1].id;
+      out.hidden = false; out.innerHTML = '<p><b>Starting...</b></p>';
+      poll();
+    }).catch(function () {
+      out.hidden = false; out.innerHTML = '<p class="err">Could not reach the API. Check the API key and try again.</p>';
+      btn.disabled = false; btn.textContent = "Start auto-fix";
+    });
+  }
+
+  window.decide = function (decision) {
+    api("POST", "/autofix/" + currentFix + "/decision", { decision: decision }).then(function () {
+      clearTimeout(pollTimer); poll();
+    });
   };
 </script>
 </body>

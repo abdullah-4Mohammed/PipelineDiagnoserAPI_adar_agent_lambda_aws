@@ -21,3 +21,8 @@ output "web_bucket" {
 output "web_distribution_id" {
   value = aws_cloudfront_distribution.web.id
 }
+
+# auto-fix workflow (for checking runs in the step functions console)
+output "autofix_state_machine" {
+  value = aws_sfn_state_machine.autofix.name
+}

@@ -2,7 +2,7 @@ steps:
 - task: JasonBJohnson.azure-pipelines-tasks-terraform.azure-pipelines-tasks-terraform-installer.TerraformInstaller@1
   displayName: "Install Terraform"
   inputs:
-    terraformVersion: '1.9.2'
+    terraformVersion: '1.11.4' # 1.11+ supports native s3 state locking (use_lockfile)
 
 - task: replacetokens@6 
   inputs:
@@ -24,6 +24,8 @@ steps:
     backendAwsRegion: $(region)
     backendAwsBucket: '$(backendBucket)'
     backendAwsKey: 'tf/$(environment).tfstate'
+    # lock the state file in s3 so two runs can never write it at the same time
+    commandOptions: '-backend-config=use_lockfile=true'
     allowTelemetryCollection: true
 
 - task: TerraformCLI@2 
@@ -32,7 +34,7 @@ steps:
     command: 'plan'
     providerServiceAws: $(awsConnection)
     workingDirectory: '$(System.DefaultWorkingDirectory)/deploy/terraform'
-    commandOptions: '-var-file=vars.tfvars --out=$(environment).tfplan'
+    commandOptions: '-var-file=vars.tfvars --out=$(environment).tfplan -lock-timeout=15m' # wait if another run holds the lock
     publishPlanResults: 'plan'
     providerAwsRegion: $(region)
     allowTelemetryCollection: true
@@ -43,7 +45,7 @@ steps:
     command: 'apply'
     providerServiceAws: $(awsConnection)
     workingDirectory: '$(System.DefaultWorkingDirectory)/deploy/terraform'
-    commandOptions: '-auto-approve $(environment).tfplan'
+    commandOptions: '-auto-approve -lock-timeout=15m $(environment).tfplan'
     allowTelemetryCollection: true
     providerAwsRegion: $(region)
 
@@ -62,3 +64,5 @@ steps:
       echo "##vso[task.setvariable variable=apiUrl;isOutput=true]$(terraform output -raw api_url)"
       echo "##vso[task.setvariable variable=webBucket;isOutput=true]$(terraform output -raw web_bucket)"
       echo "##vso[task.setvariable variable=webDistributionId;isOutput=true]$(terraform output -raw web_distribution_id)"
+      echo "##vso[task.setvariable variable=webUrl;isOutput=true]$(terraform output -raw web_url)"
+      echo "##vso[task.setvariable variable=apiKeyId;isOutput=true]$(terraform output -raw api_key_id)"

@@ -1,4 +1,4 @@
-name: $(SourceBranchName)-$(Date:yyyyMMdd)$(Rev:.r)
+name: $(SourceBranchName)-$(Date:yyyyMMdd)$(Rev:.r)-${{ join('-', parameters.environments) }}
 #go
 trigger:
   branches:
@@ -19,6 +19,8 @@ resources:
 variables:
 - template: variables/vars-global.yaml
 
+# runs deploy nonprod by default; prod is deployed only when asked for (environments: [prod])
+# and only from main, after nonprod has been checked
 parameters:
 - name: environments
   type: object
@@ -31,9 +33,17 @@ stages:
 - ${{ each env in parameters.environments }}:
   - stage: Deploy_${{ env }}
     displayName: Deploy ${{ env }}
+    ${{ if eq(env, 'prod') }}:
+      condition: eq(variables['Build.SourceBranch'], 'refs/heads/main')
     jobs:
+    - job: Unit_Test
+      displayName: Unit tests
+      steps:
+      - template: templates/steps-unit-test.yaml
+
     - job: Deploy_Terraform
       displayName: Deploy terraform infrastructure
+      dependsOn: Unit_Test
       #condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
       variables:
       - template: variables/vars-${{ env }}.yaml
@@ -53,3 +63,19 @@ stages:
         value: $[ dependencies.Deploy_Terraform.outputs['tfOutputs.webDistributionId'] ]
       steps:
       - template: templates/steps-deploy-webapp.yaml
+
+    - job: Smoke_Test
+      displayName: Smoke test
+      dependsOn:
+      - Deploy_Terraform
+      - Deploy_WebApp
+      variables:
+      - template: variables/vars-${{ env }}.yaml
+      - name: apiUrl
+        value: $[ dependencies.Deploy_Terraform.outputs['tfOutputs.apiUrl'] ]
+      - name: webUrl
+        value: $[ dependencies.Deploy_Terraform.outputs['tfOutputs.webUrl'] ]
+      - name: apiKeyId
+        value: $[ dependencies.Deploy_Terraform.outputs['tfOutputs.apiKeyId'] ]
+      steps:
+      - template: templates/steps-smoke-test.yaml
