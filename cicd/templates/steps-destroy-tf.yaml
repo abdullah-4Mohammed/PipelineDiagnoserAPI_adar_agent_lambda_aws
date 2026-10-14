@@ -1,0 +1,38 @@
+steps:
+- task: JasonBJohnson.azure-pipelines-tasks-terraform.azure-pipelines-tasks-terraform-installer.TerraformInstaller@1
+  displayName: "Install Terraform"
+  inputs:
+    terraformVersion: '1.11.4'
+
+- task: replacetokens@6
+  inputs:
+    root: '$(System.DefaultWorkingDirectory)/deploy/terraform'
+    sources : '**/*.tfvars'
+    addBOM: true
+    tokenPattern: 'doubleunderscores'
+    logLevel: 'warn'
+    ifNoFilesFound: 'warn'
+    telemetryOptout: true
+
+- task: TerraformCLI@2
+  displayName: "Terraform init"
+  inputs:
+    backendType: 'aws'
+    command: 'init'
+    workingDirectory: '$(System.DefaultWorkingDirectory)/deploy/terraform'
+    backendServiceAws: $(awsConnection)
+    backendAwsRegion: $(region)
+    backendAwsBucket: '$(backendBucket)'
+    backendAwsKey: 'tf/$(environment).tfstate'
+    commandOptions: '-backend-config=use_lockfile=true'
+    allowTelemetryCollection: true
+
+- task: TerraformCLI@2
+  displayName: 'Terraform destroy'
+  inputs:
+    command: 'destroy'
+    providerServiceAws: $(awsConnection)
+    workingDirectory: '$(System.DefaultWorkingDirectory)/deploy/terraform'
+    commandOptions: '-var-file=vars.tfvars -auto-approve -lock-timeout=15m'
+    allowTelemetryCollection: true
+    providerAwsRegion: $(region)

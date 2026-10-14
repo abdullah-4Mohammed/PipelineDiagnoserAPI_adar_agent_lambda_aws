@@ -1,0 +1,20 @@
+name: destroy-$(Date:yyyyMMdd)$(Rev:.r)-${{ parameters.environment }}
+trigger: none
+pool: { vmImage: 'ubuntu-latest' }
+resources:
+- repo: self
+parameters:
+- name: environment
+  type: string
+  default: dev
+  values: [dev, nonprod, prod]
+variables:
+- template: variables/vars-global.yaml
+- name: environment
+  value: ${{ parameters.environment }}
+stages:
+- stage: Destroy_${{ parameters.environment }}
+  jobs:
+  - job: Destroy_Terraform
+    steps:
+    - template: templates/steps-destroy-tf.yaml
