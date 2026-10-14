@@ -24,9 +24,6 @@ parameters:
 - name: environments
   type: object
   default: ['nonprod']
-# - name: namespaces
-#   type: object
-#   default: ['dev']
 
 stages:
 - ${{ each env in parameters.environments }}:
