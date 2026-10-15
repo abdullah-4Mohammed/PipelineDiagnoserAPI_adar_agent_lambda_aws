@@ -153,7 +153,7 @@ def fetch_failed_log(run_id):
 
 
 def start_run(pipeline_id, branch="main", deploy_to=None):
-    # deploy_to=None runs the pipeline's default (nonprod); "prod" asks for the prod stage
+    # deploy_to=None runs the pipeline's default (staging); "prod" asks for the prod stage
     payload = {"resources": {"repositories": {"self": {"refName": f"refs/heads/{branch}"}}}}
     if deploy_to:
         payload["templateParameters"] = {"environments": f"[{deploy_to}]"}

@@ -1,5 +1,5 @@
 """Auto-fix agent steps, run in order by the step functions workflow:
-propose -> approve fix -> push -> deploy nonprod + check -> approve prod -> deploy prod + check -> finish.
+propose -> approve fix -> push -> deploy staging + check -> approve prod -> deploy prod + check -> finish.
 Approvals wait for you on the web page.
 Each handler is small and does one job, so each step can be retried and controlled on its own."""
 import difflib
@@ -138,16 +138,16 @@ def push(event, context):
     return {**event, "commit": sha, "pipelineId": int(item["pipelineId"]), "branch": item["branch"]}
 
 
-# ---------- 4. deploy (nonprod first, prod after approval) and watch it ----------
+# ---------- 4. deploy (staging first, prod after approval) and watch it ----------
 def start(event, context):
-    env = event.get("deployTo", "nonprod")
-    new_run = start_run(event["pipelineId"], event["branch"], None if env == "nonprod" else env)
+    env = event.get("deployTo", "staging")
+    new_run = start_run(event["pipelineId"], event["branch"], None if env == "staging" else env)
     save(event["fixId"], status=f"running_{env}", newRunId=new_run, **{f"{env}RunId": new_run})
     return {**event, "newRunId": new_run}
 
 
 def check(event, context):
-    env = event.get("deployTo", "nonprod")
+    env = event.get("deployTo", "staging")
     status, result = run_status(event["newRunId"])
     done = status == "completed"
     if done:
@@ -159,10 +159,10 @@ def finish(event, context):
     item = table.get_item(Key={"id": event["fixId"]})["Item"]
     outcome = event.get("outcome", "")
     text = {
-        "green": f"Fix deployed to nonprod and prod, both green (prod run {item.get('prodRunId')}).",
+        "green": f"Fix deployed to staging and prod, both green (prod run {item.get('prodRunId')}).",
         "rejected": "You rejected the proposed fix. Nothing was pushed.",
-        "green_branch": f"Fix is green on branch {item.get('branch')} (run {item.get('nonprodRunId')}). Branches never deploy to prod; merge to main to promote.",
-        "prod_rejected": f"Fix is live and green on nonprod (run {item.get('nonprodRunId')}). You chose not to deploy it to prod.",
+        "green_branch": f"Fix is green on branch {item.get('branch')} (run {item.get('stagingRunId')}). Branches never deploy to prod; merge to main to promote.",
+        "prod_rejected": f"Fix is live and green on staging (run {item.get('stagingRunId')}). You chose not to deploy it to prod.",
         "gave_up": f"Pipeline {item.get('pipeline')} still fails after {item.get('attempt')} attempts. Stopped.",
         "expired": "No approval within 24 hours, stopped.",
         "error": f"The agent hit an error: {str(event.get('detail', ''))[:500]}",
