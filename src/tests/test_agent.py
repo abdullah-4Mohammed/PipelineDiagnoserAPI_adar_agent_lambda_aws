@@ -63,12 +63,12 @@ def test_decision_only_when_waiting_for_approval(monkeypatch):
     assert autofix_api.decide("f1", "approve") is True and len(sent) == 1
 
 
-def test_start_deploys_nonprod_by_default_and_prod_on_request(monkeypatch):
+def test_start_deploys_staging_by_default_and_prod_on_request(monkeypatch):
     calls, saved = [], {}
     monkeypatch.setattr(agent, "start_run", lambda pid, branch, env: calls.append(env) or 100)
     monkeypatch.setattr(agent, "save", lambda fix_id, **f: saved.update(f))
-    agent.start({"fixId": "f1", "pipelineId": 9, "branch": "main", "deployTo": "nonprod"}, None)
-    assert calls[-1] is None and saved["status"] == "running_nonprod" and saved["nonprodRunId"] == 100
+    agent.start({"fixId": "f1", "pipelineId": 9, "branch": "main", "deployTo": "staging"}, None)
+    assert calls[-1] is None and saved["status"] == "running_staging" and saved["stagingRunId"] == 100
     agent.start({"fixId": "f1", "pipelineId": 9, "branch": "main", "deployTo": "prod"}, None)
     assert calls[-1] == "prod" and saved["status"] == "running_prod" and saved["prodRunId"] == 100
 

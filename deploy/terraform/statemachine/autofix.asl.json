@@ -1,5 +1,5 @@
 {
-  "Comment": "Auto-fix agent: diagnose a failed run, propose a fix, approval 1 -> push + deploy nonprod + check, approval 2 -> deploy prod + check",
+  "Comment": "Auto-fix agent: diagnose a failed run, propose a fix, approval 1 -> push + deploy staging + check, approval 2 -> deploy prod + check",
   "StartAt": "Propose",
   "States": {
     "Propose": {
@@ -41,9 +41,9 @@
       "Type": "Task",
       "Resource": "${push}",
       "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "Error" }],
-      "Next": "ToNonprod"
+      "Next": "ToStaging"
     },
-    "ToNonprod": { "Type": "Pass", "Result": "nonprod", "ResultPath": "$.deployTo", "Next": "StartRun" },
+    "ToStaging": { "Type": "Pass", "Result": "staging", "ResultPath": "$.deployTo", "Next": "StartRun" },
 
     "StartRun": {
       "Type": "Task",
@@ -65,12 +65,12 @@
         { "Variable": "$.done", "BooleanEquals": false, "Next": "WaitRun" },
         { "And": [
             { "Variable": "$.result", "StringEquals": "succeeded" },
-            { "Variable": "$.deployTo", "StringEquals": "nonprod" },
+            { "Variable": "$.deployTo", "StringEquals": "staging" },
             { "Variable": "$.branch", "StringEquals": "main" }
           ], "Next": "ApprovePromote" },
         { "And": [
             { "Variable": "$.result", "StringEquals": "succeeded" },
-            { "Variable": "$.deployTo", "StringEquals": "nonprod" }
+            { "Variable": "$.deployTo", "StringEquals": "staging" }
           ], "Next": "GreenNoProd" },
         { "Variable": "$.result", "StringEquals": "succeeded", "Next": "Green" }
       ],
@@ -78,7 +78,7 @@
     },
 
     "ApprovePromote": {
-      "Comment": "approval 2 (main only, branches never reach prod): nonprod is green, deploy the same change to prod",
+      "Comment": "approval 2 (main only, branches never reach prod): staging is green, deploy the same change to prod",
       "Type": "Task",
       "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
       "Parameters": {
@@ -106,7 +106,7 @@
       "Default": "GaveUp"
     },
     "NextAttempt": {
-      "Comment": "a new fix always goes through nonprod again before prod",
+      "Comment": "a new fix always goes through staging again before prod",
       "Type": "Pass",
       "Parameters": { "fixId.$": "$.fixId", "runId.$": "$.newRunId", "attempt.$": "States.MathAdd($.attempt, 1)" },
       "Next": "Propose"

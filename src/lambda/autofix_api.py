@@ -14,7 +14,7 @@ STATE_MACHINE = os.environ["STATE_MACHINE_ARN"]
 # fields the page is allowed to see (the task token stays private)
 PUBLIC = ["id", "status", "runId", "attempt", "pipeline", "failedSteps", "file", "rootCause",
           "summary", "confidence", "diff", "commit", "newRunId", "result", "reason", "history",
-          "approvalType", "nonprodRunId", "prodRunId"]
+          "approvalType", "stagingRunId", "prodRunId"]
 
 
 def response(status, body):

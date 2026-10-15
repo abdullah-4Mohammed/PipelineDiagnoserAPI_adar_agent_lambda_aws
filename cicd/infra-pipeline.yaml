@@ -18,12 +18,12 @@ resources:
 variables:
 - template: variables/vars-global.yaml
 
-# runs deploy nonprod by default; prod is deployed only when asked for (environments: [prod])
-# and only from main, after nonprod has been checked
+# runs deploy staging by default; prod is deployed only when asked for (environments: [prod])
+# and only from main, after staging has been checked
 parameters:
 - name: environments
   type: object
-  default: ['nonprod']
+  default: ['staging']
 
 stages:
 - ${{ each env in parameters.environments }}:

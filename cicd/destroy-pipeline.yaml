@@ -7,7 +7,7 @@ parameters:
 - name: environment
   type: string
   default: dev
-  values: [dev, nonprod, prod]
+  values: [dev, staging, prod]
 variables:
 - template: variables/vars-global.yaml
 - name: environment
