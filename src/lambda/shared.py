@@ -216,6 +216,17 @@ def create_pr(repo, head, base, title, body):
     return pr["number"], pr["html_url"]
 
 
+def merge_pr(repo, number, title, message):
+    # merge an open pull request with a merge commit and return the commit sha;
+    # a pull request that is already merged (a retried step) just returns its commit
+    pr = gh(f"repos/{repo}/pulls/{number}")
+    if pr.get("merged"):
+        return pr.get("merge_commit_sha", "")
+    res = gh(f"repos/{repo}/pulls/{number}/merge",
+             {"merge_method": "merge", "commit_title": title, "commit_message": message}, method="PUT")
+    return res.get("sha", "")
+
+
 def pr_state(repo, number):
     # "open", "closed" (without merging) or "merged"
     pr = gh(f"repos/{repo}/pulls/{number}")

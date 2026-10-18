@@ -113,14 +113,36 @@ def test_push_on_a_retry_keeps_the_same_fix_branch(monkeypatch):
     assert created == [] and committed == ["fix/run-7"]
 
 
-def test_merge_staging_merges_the_fix_branch_into_staging(monkeypatch):
-    merged, saved = [], {}
+def test_merge_staging_opens_a_pr_and_merges_it_with_skip_ci(monkeypatch):
+    opened, merged, saved = [], [], {}
     monkeypatch.setattr(agent, "table", FakeFixTable(**FIX))
     monkeypatch.setattr(agent, "save", lambda fix_id, **f: saved.update(f))
-    monkeypatch.setattr(agent, "merge_branch", lambda repo, base, head, msg: merged.append((base, head)) or "m1")
+    monkeypatch.setattr(agent, "create_pr",
+                        lambda repo, head, base, title, body: opened.append((head, base)) or (8, "https://github.com/o/r/pull/8"))
+    monkeypatch.setattr(agent, "merge_pr", lambda repo, number, title, msg: merged.append((number, title)) or "m1")
     event = {"fixId": "f1", "branch": "fix/run-7"}
     assert agent.merge_staging(event, None) == event
-    assert merged == [("staging", "fix/run-7")] and saved["status"] == "merged_staging"
+    assert opened == [("fix/run-7", "staging")]
+    assert merged == [(8, "Merge fix/run-7 into staging [skip ci]")]
+    assert saved["status"] == "merged_staging" and saved["stagingPr"] == 8 and saved["stagingCommit"] == "m1"
+
+
+def test_merge_pr_merges_once_and_returns_the_commit_for_an_already_merged_pr(monkeypatch):
+    import shared
+    calls = []
+    state = {"merged": False}
+
+    def fake_gh(path, payload=None, method=None):
+        calls.append((path, method))
+        if method == "PUT":
+            return {"sha": "m9"}
+        return {"merged": state["merged"], "merge_commit_sha": "m5"}
+
+    monkeypatch.setattr(shared, "gh", fake_gh)
+    assert shared.merge_pr("o/r", 8, "t", "") == "m9" and calls[-1] == ("repos/o/r/pulls/8/merge", "PUT")
+    state["merged"] = True
+    calls.clear()
+    assert shared.merge_pr("o/r", 8, "t", "") == "m5" and all(m != "PUT" for _, m in calls)
 
 
 def test_open_pr_goes_from_staging_to_main_and_sets_a_deadline(monkeypatch):

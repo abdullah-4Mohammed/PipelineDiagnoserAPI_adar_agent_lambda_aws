@@ -12,7 +12,7 @@ import time
 import boto3
 
 from shared import (call_llm, commit_file, create_branch, create_pr, fetch_failed_log, mask,
-                    merge_branch, pr_state, read_file, repo_files, run_status, start_run)
+                    merge_pr, pr_state, read_file, repo_files, run_status, start_run)
 
 table = boto3.resource("dynamodb").Table(os.environ["FIX_TABLE"])
 MAX_FILE_CHARS = 15000
@@ -170,11 +170,15 @@ def check(event, context):
     return {**event, "done": done, "result": result}
 
 
-# ---------- 5. dev is green: merge the fix branch into staging (no review, the agent may do this) ----------
+# ---------- 5. dev is green: merge the fix branch into staging through a pull request (no review, the agent may do this) ----------
+# going through a pull request leaves a record on GitHub and lets "Automatically delete head branches" remove the fix branch
 def merge_staging(event, context):
     item = table.get_item(Key={"id": event["fixId"]})["Item"]
-    sha = merge_branch(item["repo"], "staging", event["branch"], f"Merge {event['branch']} into staging [skip ci]")
-    save(event["fixId"], status="merged_staging", stagingCommit=sha)
+    body = f"{item['summary']}\n\nRoot cause: {item['rootCause']}\n\nGreen on dev, merged by the agent."
+    number, _ = create_pr(item["repo"], event["branch"], "staging", f"Fix {item['pipeline']} run {item['runId']}: {item['summary']}", body)
+    # [skip ci]: the agent starts the staging run itself, so the merge must not start a second one
+    sha = merge_pr(item["repo"], number, f"Merge {event['branch']} into staging [skip ci]", "")
+    save(event["fixId"], status="merged_staging", stagingCommit=sha, stagingPr=number)
     return event
 
 
