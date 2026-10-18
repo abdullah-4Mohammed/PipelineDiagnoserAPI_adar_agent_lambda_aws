@@ -1,7 +1,9 @@
-name: $(SourceBranchName)-$(Date:yyyyMMdd)$(Rev:.r)-${{ join('-', parameters.environments) }}
+name: $(SourceBranchName)-$(Date:yyyyMMdd)$(Rev:.r)-${{ variables.environment }}
 trigger:
   branches:
     include:
+    - '*'
+    exclude:
     - main
   paths:
     include:
@@ -9,69 +11,62 @@ trigger:
     - deploy
     - src
 
-pool: 
+pool:
   vmImage: 'ubuntu-latest'
 
 resources:
 - repo: self
 
+# the branch decides the environment: main -> prod, staging -> staging, any other branch -> dev
+# main has no trigger: prod is deployed by running this pipeline on main by hand
 variables:
 - template: variables/vars-global.yaml
-
-# runs deploy staging by default; prod is deployed only when asked for (environments: [prod])
-# and only from main, after staging has been checked
-parameters:
-- name: environments
-  type: object
-  default: ['staging']
+- ${{ if eq(variables['Build.SourceBranch'], 'refs/heads/main') }}:
+  - template: variables/vars-prod.yaml
+- ${{ elseif eq(variables['Build.SourceBranch'], 'refs/heads/staging') }}:
+  - template: variables/vars-staging.yaml
+- ${{ else }}:
+  - template: variables/vars-dev.yaml
 
 stages:
-- ${{ each env in parameters.environments }}:
-  - stage: Deploy_${{ env }}
-    displayName: Deploy ${{ env }}
-    ${{ if eq(env, 'prod') }}:
-      condition: eq(variables['Build.SourceBranch'], 'refs/heads/main')
-    jobs:
-    - job: Unit_Test
-      displayName: Unit tests
-      steps:
-      - template: templates/steps-unit-test.yaml
+- stage: Deploy_${{ variables.environment }}
+  displayName: Deploy ${{ variables.environment }}
+  jobs:
+  - job: Unit_Test
+    displayName: Unit tests
+    steps:
+    - template: templates/steps-unit-test.yaml
 
-    - job: Deploy_Terraform
-      displayName: Deploy terraform infrastructure
-      dependsOn: Unit_Test
-      #condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
-      variables:
-      - template: variables/vars-${{ env }}.yaml
-      steps:
-      - template: templates/steps-deploy-tf.yaml
+  - job: Deploy_Terraform
+    displayName: Deploy terraform infrastructure
+    dependsOn: Unit_Test
+    steps:
+    - template: templates/steps-deploy-tf.yaml
 
-    - job: Deploy_WebApp
-      displayName: Deploy web page
-      dependsOn: Deploy_Terraform
-      variables:
-      - template: variables/vars-${{ env }}.yaml
-      - name: apiUrl
-        value: $[ dependencies.Deploy_Terraform.outputs['tfOutputs.apiUrl'] ]
-      - name: webBucket
-        value: $[ dependencies.Deploy_Terraform.outputs['tfOutputs.webBucket'] ]
-      - name: webDistributionId
-        value: $[ dependencies.Deploy_Terraform.outputs['tfOutputs.webDistributionId'] ]
-      steps:
-      - template: templates/steps-deploy-webapp.yaml
+  - job: Deploy_WebApp
+    displayName: Deploy web page
+    dependsOn: Deploy_Terraform
+    variables:
+    - name: apiUrl
+      value: $[ dependencies.Deploy_Terraform.outputs['tfOutputs.apiUrl'] ]
+    - name: webBucket
+      value: $[ dependencies.Deploy_Terraform.outputs['tfOutputs.webBucket'] ]
+    - name: webDistributionId
+      value: $[ dependencies.Deploy_Terraform.outputs['tfOutputs.webDistributionId'] ]
+    steps:
+    - template: templates/steps-deploy-webapp.yaml
 
-    - job: Smoke_Test
-      displayName: Smoke test
-      dependsOn:
-      - Deploy_Terraform
-      - Deploy_WebApp
-      variables:
-      - template: variables/vars-${{ env }}.yaml
-      - name: apiUrl
-        value: $[ dependencies.Deploy_Terraform.outputs['tfOutputs.apiUrl'] ]
-      - name: webUrl
-        value: $[ dependencies.Deploy_Terraform.outputs['tfOutputs.webUrl'] ]
-      - name: apiKeyId
-        value: $[ dependencies.Deploy_Terraform.outputs['tfOutputs.apiKeyId'] ]
-      steps:
-      - template: templates/steps-smoke-test.yaml
+  - job: Smoke_Test
+    displayName: Smoke test
+    dependsOn:
+    - Deploy_Terraform
+    - Deploy_WebApp
+    variables:
+    - name: apiUrl
+      value: $[ dependencies.Deploy_Terraform.outputs['tfOutputs.apiUrl'] ]
+    - name: webUrl
+      value: $[ dependencies.Deploy_Terraform.outputs['tfOutputs.webUrl'] ]
+    - name: apiKeyId
+      value: $[ dependencies.Deploy_Terraform.outputs['tfOutputs.apiKeyId'] ]
+    steps:
+    - template: templates/steps-smoke-test.yaml
