@@ -152,11 +152,10 @@ def fetch_failed_log(run_id):
     return "\n\n".join(parts), run
 
 
-def start_run(pipeline_id, branch="main", deploy_to=None):
-    # deploy_to=None runs the pipeline's default (staging); "prod" asks for the prod stage
+def start_run(pipeline_id, branch="main"):
+    # a plain run on a branch: the pipeline picks the environment from the branch
+    # (main -> prod, staging -> staging, any other branch -> dev)
     payload = {"resources": {"repositories": {"self": {"refName": f"refs/heads/{branch}"}}}}
-    if deploy_to:
-        payload["templateParameters"] = {"environments": f"[{deploy_to}]"}
     return ado_request(f"pipelines/{pipeline_id}/runs", payload=payload)["id"]
 
 
@@ -185,6 +184,42 @@ def repo_files(repo, ref, prefixes=("cicd/", "deploy/", "src/")):
 def read_file(repo, path, ref):
     f = gh(f"repos/{repo}/contents/{urllib.parse.quote(path)}?ref={ref}")
     return base64.b64decode(f["content"]).decode("utf-8"), f["sha"]
+
+
+def create_branch(repo, branch, sha):
+    # new branch pointing at a commit; an existing branch (a retried step) is left as it is
+    try:
+        gh(f"repos/{repo}/git/refs", {"ref": f"refs/heads/{branch}", "sha": sha})
+    except urllib.error.HTTPError as e:
+        if e.code != 422:
+            raise
+
+
+def merge_branch(repo, base, head, message):
+    # merge head into base with a merge commit; an empty reply means there was nothing to merge
+    res = gh(f"repos/{repo}/merges", {"base": base, "head": head, "commit_message": message})
+    return res.get("sha", "")
+
+
+def create_pr(repo, head, base, title, body):
+    # open a pull request, or return the one that is already open for the same branches
+    try:
+        pr = gh(f"repos/{repo}/pulls", {"title": title, "head": head, "base": base, "body": body})
+    except urllib.error.HTTPError as e:
+        if e.code != 422:
+            raise
+        owner = repo.split("/")[0]
+        found = gh(f"repos/{repo}/pulls?state=open&head={owner}:{head}&base={base}")
+        if not found:
+            raise
+        pr = found[0]
+    return pr["number"], pr["html_url"]
+
+
+def pr_state(repo, number):
+    # "open", "closed" (without merging) or "merged"
+    pr = gh(f"repos/{repo}/pulls/{number}")
+    return "merged" if pr.get("merged") else pr["state"]
 
 
 def commit_file(repo, path, content, message, branch="main"):

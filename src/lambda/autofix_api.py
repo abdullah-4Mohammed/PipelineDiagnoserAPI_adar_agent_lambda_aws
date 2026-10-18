@@ -14,7 +14,7 @@ STATE_MACHINE = os.environ["STATE_MACHINE_ARN"]
 # fields the page is allowed to see (the task token stays private)
 PUBLIC = ["id", "status", "runId", "attempt", "pipeline", "failedSteps", "file", "rootCause",
           "summary", "confidence", "diff", "commit", "newRunId", "result", "reason", "history",
-          "approvalType", "stagingRunId", "prodRunId"]
+          "approvalType", "devRunId", "stagingRunId", "prodRunId", "fixBranch", "prNumber", "prUrl"]
 
 
 def response(status, body):
@@ -38,10 +38,13 @@ def decide(fix_id, decision):
     item = table.get_item(Key={"id": fix_id}).get("Item")
     if not item or item.get("status") != "waiting_approval":
         return False
+    # "pr_only" (open the pull request and stop) only exists at the promote approval
+    if decision == "pr_only" and item.get("approvalType") != "promote":
+        return False
     sfn.send_task_success(taskToken=item["taskToken"], output=json.dumps({"decision": decision}))
     table.update_item(Key={"id": fix_id}, UpdateExpression="SET #s = :s",
                       ExpressionAttributeNames={"#s": "status"},
-                      ExpressionAttributeValues={":s": "approved" if decision == "approve" else "rejecting"})
+                      ExpressionAttributeValues={":s": "rejecting" if decision == "reject" else "approved"})
     return True
 
 
@@ -63,8 +66,8 @@ def handler(event, context):
 
         if method == "POST" and path == "/autofix/{id}/decision":
             decision = json.loads(event.get("body") or "{}").get("decision")
-            if decision not in ("approve", "reject"):
-                return response(400, {"error": "decision must be approve or reject"})
+            if decision not in ("approve", "reject", "pr_only"):
+                return response(400, {"error": "decision must be approve, pr_only or reject"})
             ok = decide(fix_id, decision)
             return response(200 if ok else 409, {"ok": ok} if ok else {"error": "Fix is not waiting for approval"})
 

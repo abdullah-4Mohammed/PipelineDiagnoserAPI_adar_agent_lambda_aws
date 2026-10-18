@@ -20,6 +20,9 @@ locals {
     push            = { handler = "agent.push", timeout = 60 }
     start           = { handler = "agent.start", timeout = 30 }
     check           = { handler = "agent.check", timeout = 30 }
+    mergeStaging    = { handler = "agent.merge_staging", timeout = 60 }
+    openPr          = { handler = "agent.open_pr", timeout = 60 }
+    checkPr         = { handler = "agent.check_pr", timeout = 30 }
     finish          = { handler = "agent.finish", timeout = 30 }
   }
 
@@ -57,6 +60,9 @@ resource "aws_sfn_state_machine" "autofix" {
     push            = aws_lambda_function.agent["push"].arn
     start           = aws_lambda_function.agent["start"].arn
     check           = aws_lambda_function.agent["check"].arn
+    mergeStaging    = aws_lambda_function.agent["mergeStaging"].arn
+    openPr          = aws_lambda_function.agent["openPr"].arn
+    checkPr         = aws_lambda_function.agent["checkPr"].arn
     finish          = aws_lambda_function.agent["finish"].arn
     maxAttempts     = var.maxAttempts
   })

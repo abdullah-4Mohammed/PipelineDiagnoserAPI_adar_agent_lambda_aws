@@ -149,12 +149,17 @@
   var STATUS_TEXT = {
     started: "Starting...", diagnosing: "Reading the run and the repo, diagnosing...",
     proposed: "Fix proposed, preparing approval...", waiting_approval: "Waiting for your approval",
-    approved: "Approved, pushing the change...", rejecting: "Rejecting...", pushed: "Pushed, starting the pipeline...",
+    approved: "Approved, pushing the change...", rejecting: "Rejecting...", pushed: "Pushed to a fix branch, starting the pipeline...",
+    running_dev: "Deploying to dev, checking every minute...", green_dev: "Dev is green, merging into staging...",
+    merged_staging: "Merged into staging, starting the pipeline...",
     running_staging: "Deploying to staging, checking every minute...", green_staging: "Staging is green",
+    pr_open: "Pull request open, waiting for you to merge it...",
     running_prod: "Deploying to prod, checking every minute...", green_prod: "Prod is green",
     failed_again: "Deploy failed, diagnosing the new failure...",
-    green: "Done: fix is green on staging and prod", green_branch: "Green on the branch (branches never deploy to prod)", prod_rejected: "Live on staging, not deployed to prod", rejected: "Rejected, nothing was pushed", gave_up: "Stopped after the maximum attempts",
-    expired: "No approval in time, nothing was pushed", no_fix: "No fix proposed", error: "Agent error"
+    green: "Done: fix is green on dev, staging and prod", pr_opened: "Done: pull request opened, nothing deployed to prod",
+    prod_rejected: "Green on staging, not promoted", pr_closed: "Pull request closed without merging",
+    rejected: "Rejected, nothing was pushed", gave_up: "Stopped after the maximum attempts",
+    expired: "No approval in time, stopped", no_fix: "No fix proposed", error: "Agent error"
   };
 
   function api(method, path, body) {
@@ -179,26 +184,33 @@
     if (f.summary) { html += '<h2>Proposed change <span class="badge ' + esc(f.confidence) + '">' + esc(f.confidence) + '</span></h2><p>' + esc(f.summary) + ' <span class="muted">(' + esc(f.file) + ')</span></p>' + renderDiff(f.diff); }
     if (f.status === "waiting_approval") {
       var promote = f.approvalType === "promote";
-      if (promote) { html += '<p><b>Staging is green (run ' + esc(f.stagingRunId) + '). Deploy this change to prod?</b></p>'; }
-      html += '<div class="actions"><button onclick="decide(\'approve\')">' + (promote ? 'Approve deploy to prod' : 'Approve and push') + '</button><button class="reject" onclick="decide(\'reject\')">Reject</button></div>';
+      if (promote) { html += '<p><b>Staging is green (run ' + esc(f.stagingRunId) + '). Open a pull request to main?</b></p>'; }
+      html += '<div class="actions"><button onclick="decide(\'approve\')">' + (promote ? 'Open PR and deploy to prod after I merge it' : 'Approve and push') + '</button>' +
+        (promote ? '<button onclick="decide(\'pr_only\')">Open PR only</button>' : '') +
+        '<button class="reject" onclick="decide(\'reject\')">Reject</button></div>';
     }
     if (f.commit) {
       html += '<p class="muted">Commit ' + esc(String(f.commit).slice(0, 7)) +
+        (f.fixBranch ? ' · branch ' + esc(f.fixBranch) : '') +
+        (f.devRunId ? ' · dev run ' + esc(f.devRunId) : '') +
         (f.stagingRunId ? ' · staging run ' + esc(f.stagingRunId) : '') +
         (f.prodRunId ? ' · prod run ' + esc(f.prodRunId) : '') + '</p>';
+    }
+    if (f.prUrl && String(f.prUrl).indexOf("https://github.com/") === 0) {
+      html += '<p><a href="' + esc(f.prUrl) + '" target="_blank" rel="noopener">Pull request #' + esc(f.prNumber) + '</a></p>';
     }
     if (f.reason) { html += '<p class="muted">' + esc(f.reason) + '</p>'; }
     out.hidden = false;
     out.innerHTML = html;
   }
 
-  var FINAL = ["green", "green_branch", "rejected", "prod_rejected", "gave_up", "expired", "no_fix", "error"];
+  var FINAL = ["green", "pr_opened", "rejected", "prod_rejected", "pr_closed", "gave_up", "expired", "no_fix", "error"];
   var currentFix = null;
   var lastStatus = null;
 
   // every status check is one api call against the daily quota, so poll
   // slowly: the agent only changes state every few seconds to a minute
-  var SLOW = ["running_staging", "running_prod", "waiting_approval"];
+  var SLOW = ["running_dev", "running_staging", "running_prod", "waiting_approval", "pr_open"];
   var FAST_MS = 10000, SLOW_MS = 30000, MAX_ERRORS = 5;
   var errorCount = 0;
 
