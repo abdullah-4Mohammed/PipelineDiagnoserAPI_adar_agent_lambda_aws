@@ -1,7 +1,2 @@
 variables:
-  # main deploys the staging stack, any other branch deploys a separate dev stack
-  # (own state file + own resource names), so a feature branch can be tested safely
-  ${{ if eq(variables['Build.SourceBranch'], 'refs/heads/main') }}:
-    environment: staging
-  ${{ else }}:
-    environment: dev
+  environment: staging
