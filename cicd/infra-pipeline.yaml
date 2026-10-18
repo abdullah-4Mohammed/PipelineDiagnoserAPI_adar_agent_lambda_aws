@@ -1,4 +1,4 @@
-name: $(SourceBranchName)-$(Date:yyyyMMdd)$(Rev:.r)-${{ variables.environment }}
+name: $(SourceBranchName)-$(Date:yyyyMMdd)$(Rev:.r)-$(environment)
 trigger:
   branches:
     include:
