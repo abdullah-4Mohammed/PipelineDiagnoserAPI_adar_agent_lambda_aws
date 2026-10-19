@@ -15,4 +15,4 @@ It can also **auto-fix** a failed Azure DevOps run: it reads the failed log and 
 - Azure DevOps Pipelines (CI/CD)
 
 ## License
-See [LICENSE](LICENSE).
+See [LICENSE.md](LICENSE.md).
